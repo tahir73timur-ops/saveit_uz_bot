@@ -3,18 +3,22 @@ const ytDlp = require('yt-dlp-exec');
 const fs = require('fs');
 const path = require('path');
 
-// Yangi tokeningizni shu yerga yozing
-const TOKEN = '8761282938:AAE_E5rfMIJgN7iuGV8ZbrTUXdaKYNcAfiU';
+const TOKEN = '8761282938:AAGQGa2gRx9YpVE0Dw3mhW2fiBxMuFzvugE';
 const bot = new Telegraf(TOKEN);
 
 bot.start((ctx) => {
-    ctx.reply("Salom! Menga YouTube/Instagram havolasini yuboring yoki qo'shiq nomi va ijodkorini yozing (masalan: Jony - Kamin), men uni MP3 qilib topib beraman! 🎵");
+    ctx.reply("Salom! Menga YouTube yoki Instagram havolasini (linkini) yuboring, men uni to'liq (full) MP3 formatida yuklab beraman! 🎵");
 });
 
 bot.on('text', async (ctx) => {
     const text = ctx.message.text.trim();
 
-    await ctx.reply("⏳ Qidirilmoqda va yuklab olinmoqda, biroz kuting...");
+    // Faqat havola ekanligini tekshiramiz
+    if (!text.includes('http://') && !text.includes('https://')) {
+        return ctx.reply("❌ Iltimos, qo'shiq qidirish uchun so'z yozmang, shunchaki bevosita **YouTube** yoki **Instagram** havolasini (linkini) tashlang!");
+    }
+
+    await ctx.reply("⏳ Havola bo'yicha yuklab olinmoqda, biroz kuting...");
 
     const downloadsDir = path.join(__dirname, 'downloads');
     if (!fs.existsSync(downloadsDir)) {
@@ -24,23 +28,14 @@ bot.on('text', async (ctx) => {
     const outputTemplate = path.join(downloadsDir, '%(id)s.%(ext)s');
 
     try {
-        let searchTarget = text;
-        
-        // Agar havola bo'lmasa, YouTube'dan to'liq audio versiyasi bo'yicha qidiramiz
-        if (!text.includes('http://') && !text.includes('https://')) {
-            searchTarget = `ytsearch1:${text} full song audio`;
-        }
-
-        await ytDlp(searchTarget, {
+        await ytDlp(text, {
             output: outputTemplate,
             extractAudio: true,
             audioFormat: 'mp3',
             audioQuality: '0',
-            defaultSearch: 'ytsearch',
             noCheckCertificates: true,
             geoBypass: true,
             extractorArgs: 'youtube:player_client=android',
-            matchFilter: 'duration > 60',
             addHeader: [
                 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             ]
@@ -48,7 +43,7 @@ bot.on('text', async (ctx) => {
 
         const files = fs.readdirSync(downloadsDir);
         if (files.length === 0) {
-            throw new Error("Musiqa topilmadi.");
+            throw new Error("Fayl topilmadi.");
         }
 
         const latestFile = files.reduce((a, b) => {
@@ -58,7 +53,7 @@ bot.on('text', async (ctx) => {
         const filePath = path.join(downloadsDir, latestFile);
 
         // Telegramga audio yuborish
-        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana so'ragan qo'shig'ingiz! 🎧" });
+        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana qo'shiqning to'liq (full) versiyasi! 🎧" });
 
         // Faylni serverdan tozalash
         setTimeout(() => {
@@ -69,7 +64,7 @@ bot.on('text', async (ctx) => {
 
     } catch (error) {
         console.error(error);
-        ctx.reply("❌ Kechirasiz, sayt so'rovni blokladi yoki qo'shiq topilmadi. Iltimos, qo'shiqning bevosita YouTube havolasini yuborib ko'ring.");
+        ctx.reply("❌ Kechirasiz, havoladan yuklab bo'lmadi. Havola to'g'riligiga yoki bloklanmaganiga amin bo'ling.");
     }
 });
 
