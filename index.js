@@ -3,17 +3,18 @@ const ytDlp = require('yt-dlp-exec');
 const fs = require('fs');
 const path = require('path');
 
-const TOKEN = '8761282938:AAEhf7SCfxTL9SeqPYWbFyMDQH3OqpOSvBg';
+// Yangi tokeningizni shu yerga yozing
+const TOKEN = '8761282938:AAE_E5rfMIJgN7iuGV8ZbrTUXdaKYNcAfiU';
 const bot = new Telegraf(TOKEN);
 
 bot.start((ctx) => {
-    ctx.reply("Salom! Menga qo'shiq nomi va ijodkorini yozing (masalan: Jony - Kamin), men uning aynan to'liq (full) versiyasini MP3 qilib topib beraman! 🎵");
+    ctx.reply("Salom! Menga YouTube/Instagram havolasini yuboring yoki qo'shiq nomi va ijodkorini yozing (masalan: Jony - Kamin), men uni MP3 qilib topib beraman! 🎵");
 });
 
 bot.on('text', async (ctx) => {
     const text = ctx.message.text.trim();
 
-    await ctx.reply("⏳ Qo'shiqning to'liq versiyasi qidirilmoqda va yuklab olinmoqda, biroz kuting...");
+    await ctx.reply("⏳ Qidirilmoqda va yuklab olinmoqda, biroz kuting...");
 
     const downloadsDir = path.join(__dirname, 'downloads');
     if (!fs.existsSync(downloadsDir)) {
@@ -25,9 +26,8 @@ bot.on('text', async (ctx) => {
     try {
         let searchTarget = text;
         
-        // Agar havola bo'lmasa, faqat to'liq studio audio versiyasini qidirish uchun kalit so'zlar qo'shamiz
+        // Agar havola bo'lmasa, YouTube'dan to'liq audio versiyasi bo'yicha qidiramiz
         if (!text.includes('http://') && !text.includes('https://')) {
-            // "full song audio" deb qidirsa, bot qisqa parchalarni emas, to'liq trekni topadi
             searchTarget = `ytsearch1:${text} full song audio`;
         }
 
@@ -40,8 +40,10 @@ bot.on('text', async (ctx) => {
             noCheckCertificates: true,
             geoBypass: true,
             extractorArgs: 'youtube:player_client=android',
-            // 1 daqiqadan qisqa bo'lgan videolarni (Shorts, parcha) tashlab yuborish sharti
             matchFilter: 'duration > 60',
+            addHeader: [
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
         });
 
         const files = fs.readdirSync(downloadsDir);
@@ -56,7 +58,7 @@ bot.on('text', async (ctx) => {
         const filePath = path.join(downloadsDir, latestFile);
 
         // Telegramga audio yuborish
-        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana qo'shiqning to'liq (full) versiyasi! 🎧" });
+        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana so'ragan qo'shig'ingiz! 🎧" });
 
         // Faylni serverdan tozalash
         setTimeout(() => {
@@ -67,7 +69,7 @@ bot.on('text', async (ctx) => {
 
     } catch (error) {
         console.error(error);
-        ctx.reply("❌ Kechirasiz, bu qo'shiqning to'liq versiyasi topilmadi yoki YouTube vaqtincha blokladi. Boshqa nom bilan urinib ko'ring.");
+        ctx.reply("❌ Kechirasiz, sayt so'rovni blokladi yoki qo'shiq topilmadi. Iltimos, qo'shiqning bevosita YouTube havolasini yuborib ko'ring.");
     }
 });
 
