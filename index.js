@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Укажите токен вашего бота
-const TOKEN = '8761282938:AAEUSIxj77OPz6nM9q9IUKb7840OFLvGXQ4';
+const TOKEN = '8761282938:AAFinex8QeoRwEhSWdVLn743wGcduQd-wC0';
 const bot = new Telegraf(TOKEN);
 
 bot.start((ctx) => {
