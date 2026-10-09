@@ -3,7 +3,7 @@ const ytDlp = require('yt-dlp-exec');
 const fs = require('fs');
 const path = require('path');
 
-const TOKEN = '8761282938:AAHBT4JC8rhZsiWGCHU0WP0q5-tlZi_R7GE';
+const TOKEN = '8761282938:AAEhf7SCfxTL9SeqPYWbFyMDQH3OqpOSvBg';
 const bot = new Telegraf(TOKEN);
 
 bot.start((ctx) => {
