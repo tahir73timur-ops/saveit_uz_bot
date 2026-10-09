@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Bot tokeningizni shu yerga yozing
-const TOKEN = '8761282938:AAHRlgyst3ACcX8EeaGS0WJQGlNBVuYkEgk';
+const TOKEN = '8761282938:AAFXIRJova80Y6vLvIb85cyFwhQtVrUgwOM';
 const bot = new Telegraf(TOKEN);
 
 // /start komandasi
