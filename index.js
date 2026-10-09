@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Bot tokeningizni shu yerga yozing
-const TOKEN = '8761282938:AAFubxN3SLSR1nC4qd__FC9koQlvELaabfY';
+const TOKEN = '8761282938:AAEUSIxj77OPz6nM9q9IUKb7840OFLvGXQ4';
 const bot = new Telegraf(TOKEN);
 
 bot.start((ctx) => {
@@ -12,7 +12,7 @@ bot.start((ctx) => {
 });
 
 bot.on('text', async (ctx) => {
-    let query = ctx.message.text.trim();
+    const text = ctx.message.text.trim();
 
     await ctx.reply("⏳ Qidirilmoqda va yuklab olinmoqda, biroz kuting...");
 
@@ -24,11 +24,11 @@ bot.on('text', async (ctx) => {
     const outputTemplate = path.join(downloadsDir, '%(id)s.%(ext)s');
 
     try {
-        let searchTarget = query;
+        let searchTarget = text;
         
-        // Agar havola bo'lmasa, uni YouTube'dan matn bo'yicha qidiramiz
-        if (!query.includes('http://') && !query.includes('https://')) {
-            searchTarget = `ytsearch1:${query}`;
+        // Agar kiritilgan matn havola bo'lmasa, uni YouTube'dan qidirish uchun moslaymiz
+        if (!text.includes('http://') && !text.includes('https://')) {
+            searchTarget = `ytsearch1:${text}`;
         }
 
         await ytDlp(searchTarget, {
@@ -37,6 +37,8 @@ bot.on('text', async (ctx) => {
             audioFormat: 'mp3',
             audioQuality: '0',
             defaultSearch: 'ytsearch',
+            noCheckCertificates: true,
+            geoBypass: true,
         });
 
         const files = fs.readdirSync(downloadsDir);
@@ -51,7 +53,7 @@ bot.on('text', async (ctx) => {
         const filePath = path.join(downloadsDir, latestFile);
 
         // Telegramga audio yuborish
-        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana so'ragan qo'shig'ingiz! 🎧" });
+        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana siz so'ragan qo'shiq! 🎧" });
 
         // Faylni serverdan tozalash
         setTimeout(() => {
@@ -62,7 +64,7 @@ bot.on('text', async (ctx) => {
 
     } catch (error) {
         console.error(error);
-        ctx.reply("❌ Kechirasiz, bu qo'shiqni topa olmadim yoki yuklab bo'lmadi.");
+        ctx.reply("❌ Kechirasiz, bu nom bo'yicha hech narsa topilmadi yoki yuklab bo'lmadi.");
     }
 });
 
