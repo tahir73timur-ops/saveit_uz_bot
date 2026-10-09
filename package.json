@@ -1,19 +1,13 @@
 {
-	"name": "telegram-bot",
-	"version": "1.0.0",
-	"main": "index.js",
-	"scripts": {
-		"start": "node index.js",
-		"dev": "nodemon index.js"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "ISC",
-	"devDependencies": {
-		"nodemon": "^3.0.1"
-	},
-	"dependencies": {
-		"node-telegram-bot-api": "^0.61.0"
-	},
-	"description": ""
+  "name": "saveit_uz_bot",
+  "version": "1.0.0",
+  "description": "YouTube and Instagram video downloader telegram bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "yt-dlp-exec": "^1.8.6"
+  }
 }
