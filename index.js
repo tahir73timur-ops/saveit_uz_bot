@@ -3,18 +3,18 @@ const ytDlp = require('yt-dlp-exec');
 const fs = require('fs');
 const path = require('path');
 
-// Укажите токен вашего бота
-const TOKEN = '8761282938:AAFinex8QeoRwEhSWdVLn743wGcduQd-wC0';
+// Yangi tokeningizni shu yerga yozing
+const TOKEN = '8761282938:AAFVx3FeL1dmijyaaZMvxRNCtBH_2aRGg1I';
 const bot = new Telegraf(TOKEN);
 
 bot.start((ctx) => {
-    ctx.reply("Salom! Menga qo'shiqning nomi va ijodkorini yozing (masalan: Jony - Kamin), men uning to'liq (full) versiyasini MP3 qilib topib beraman! 🎵");
+    ctx.reply("Salom! Menga YouTube/Instagram havolasini yuboring yoki qo'shiq nomi va ijodkorini yozing (masalan: Jony - Kamin), men uni MP3 qilib topib beraman! 🎵");
 });
 
 bot.on('text', async (ctx) => {
-    let query = ctx.message.text.trim();
+    const text = ctx.message.text.trim();
 
-    await ctx.reply("⏳ Qo'shiqning to'liq versiyasi qidirilmoqda va yuklab olinmoqda, biroz kuting...");
+    await ctx.reply("⏳ Qidirilmoqda va yuklab olinmoqda, biroz kuting...");
 
     const downloadsDir = path.join(__dirname, 'downloads');
     if (!fs.existsSync(downloadsDir)) {
@@ -24,21 +24,23 @@ bot.on('text', async (ctx) => {
     const outputTemplate = path.join(downloadsDir, '%(id)s.%(ext)s');
 
     try {
-        let searchTarget = query;
+        let searchTarget = text;
         
-        // Если это не прямая ссылка, ищем полноценный трек (добавляем 'audio', чтобы не скачивались клипы с лишними звуками)
-        if (!query.includes('http://') && !query.includes('https://')) {
-            searchTarget = `ytsearch1:${query} audio`;
+        // Agar havola bo'lmasa, uni YouTube'dan to'liq audio versiyasi bo'yicha qidiramiz
+        if (!text.includes('http://') && !text.includes('https://')) {
+            searchTarget = `ytsearch1:${text} official audio`;
         }
 
         await ytDlp(searchTarget, {
             output: outputTemplate,
             extractAudio: true,
             audioFormat: 'mp3',
-            audioQuality: '0', // Максимальное качество звука
+            audioQuality: '0',
             defaultSearch: 'ytsearch',
             noCheckCertificates: true,
             geoBypass: true,
+            // YouTube blokirovkasini chetlab o'tish uchun qo'shimcha parametrlar
+            extractorArgs: 'youtube:player_client=android',
         });
 
         const files = fs.readdirSync(downloadsDir);
@@ -52,10 +54,10 @@ bot.on('text', async (ctx) => {
 
         const filePath = path.join(downloadsDir, latestFile);
 
-        // Отправка готового аудиофайла пользователю
-        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana qo'shiqning to'liq (full) versiyasi! 🎧" });
+        // Telegramga audio yuborish
+        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana so'ragan qo'shig'ingiz! 🎧" });
 
-        // Удаление файла с сервера после отправки
+        // Faylni serverdan tozalash
         setTimeout(() => {
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
@@ -64,7 +66,7 @@ bot.on('text', async (ctx) => {
 
     } catch (error) {
         console.error(error);
-        ctx.reply("❌ Kechirasiz, bu qo'shiqni topib bo'lmadi yoki YouTube vaqtincha blokladi. Birozdan keyin qayta urinib ko'ring.");
+        ctx.reply("❌ Kechirasiz, YouTube serveri so'rovni blokladi yoki qo'shiq topilmadi. Iltimos, qo'shiqning bevosita YouTube havolasini yuborib ko'ring.");
     }
 });
 
