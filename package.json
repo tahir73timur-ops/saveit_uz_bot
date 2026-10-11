@@ -1,13 +1,16 @@
 {
-  "name": "saveit_uz_bot",
+  "name": "music-bot",
   "version": "1.0.0",
-  "description": "YouTube and Instagram video downloader telegram bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "telegraf": "latest",
-    "yt-dlp-exec": "latest"
+    "axios": "^1.x.x",
+    "fluent-ffmpeg": "^2.x.x",
+    "ffmpeg-static": "^5.x.x",
+    "form-data": "^4.x.x",
+    "grammy": "^1.x.x",
+    "play-dl": "^1.x.x"
   }
 }
