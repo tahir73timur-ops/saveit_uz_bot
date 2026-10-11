@@ -16,6 +16,13 @@ const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
 
+// play-dl sozlamasini faollashtirish
+try {
+  play.authorization();
+} catch (e) {
+  console.log("play-dl auth warning:", e.message);
+}
+
 // /start komandasi
 bot.command('start', (ctx) => {
   ctx.reply(
@@ -116,7 +123,7 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
           if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
 
           if (result && result.status === 'success' && result.result) {
-            const songName = `${result.result.artist} - ${result.result.title}`;
+            const songName = `${result.result.artist} ${result.result.title}`;
             await ctx.api.editMessageText(
               ctx.chat.id,
               waitingMsg.message_id,
@@ -153,9 +160,7 @@ bot.on('message:text', async (ctx) => {
   await downloadAndSendSong(ctx, text, waitingMsg);
 });
 
-bot.start();
-console.log('Bot muvaffaqiyatli ishga tushdi!');
-// Botni ishga tushirish
+// Botni ishga tushirish (FAQAT 1 MARTA)
 bot.start();
 console.log('Bot muvaffaqiyatli ishga tushdi!');
 
