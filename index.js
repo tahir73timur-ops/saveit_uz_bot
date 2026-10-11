@@ -1,4 +1,15 @@
+// 1. grammy kutubxonasini FAQAT BIR MARTA uling:
+const { Bot, InputFile } = require('grammy');
 
+// 2. Boshqa kutubxonalar:
+const play = require('play-dl');
+const ffmpegPath = require('ffmpeg-static');
+const ffmpeg = require('fluent-ffmpeg');
+
+// 3. FFmpeg yo'lini o'rnatish:
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+// Botingizning qolgan kodi shu yerdan davom etadi...
 // Tepaga faqat ffmpeg va yangi kutubxonalarni qo'shing:
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
