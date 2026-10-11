@@ -1,3 +1,13 @@
+// 1. Kutubxonalarni ulash
+const { Bot } = require('grammy');
+const play = require('play-dl');
+
+// 2. FFmpeg sozlamasini o'rnatish
+const ffmpegPath = require('ffmpeg-static');
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+// Botingiz kodi shu yerdan davom etadi...
 const { Bot, InputFile } = require('grammy');
 const play = require('play-dl');
 const axios = require('axios');
