@@ -1,21 +1,12 @@
-// 1. grammy kutubxonasini FAQAT BIR MARTA uling:
+// Faylning eng tepasida FAQAT 1 MARTA bo'lishi kerak:
 const { Bot, InputFile } = require('grammy');
-
-// 2. Boshqa kutubxonalar:
 const play = require('play-dl');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 
-// 3. FFmpeg yo'lini o'rnatish:
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Botingizning qolgan kodi shu yerdan davom etadi...
-// Tepaga faqat ffmpeg va yangi kutubxonalarni qo'shing:
-const ffmpegPath = require('ffmpeg-static');
-const ffmpeg = require('fluent-ffmpeg');
-ffmpeg.setFfmpegPath(ffmpegPath);
-
-// grammy'ni takrorlamasdan, faqat bitta joyda e'lon qiling:
+// Botingizning qolgan kodi va oxiridagi HTTP server kodi shu yerda qoladi...
 const { Bot, InputFile } = require('grammy');
 const { Bot, InputFile } = require('grammy');
 const play = require('play-dl');
