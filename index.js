@@ -1,75 +1,157 @@
-const { Telegraf } = require('telegraf');
-const ytDlp = require('yt-dlp-exec');
+const { Bot, InputFile } = require('grammy');
+const play = require('play-dl');
+const axios = require('axios');
+const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
 
-const TOKEN = '8761282938:AAGQGa2gRx9YpVE0Dw3mhW2fiBxMuFzvugE';
-const bot = new Telegraf(TOKEN);
+ffmpeg.setFfmpegPath(ffmpegPath);
 
-bot.start((ctx) => {
-    ctx.reply("Salom! Menga YouTube yoki Instagram havolasini (linkini) yuboring, men uni to'liq (full) MP3 formatida yuklab beraman! 🎵");
+// BU YERGA O'Z TOKENINGIZNI YOZING:
+const BOT_TOKEN = "8761282938:AAFHw0qhsH-l3hYURIRcfdTGcTJ7v3puoC8";
+// BU YERGA AUDD API KALITINGIZNI YOZING:
+const AUDD_API_KEY = "your_audd_api_key_here";
+
+const bot = new Bot(BOT_TOKEN);
+
+// /start komandasi
+bot.command('start', (ctx) => {
+  ctx.reply(
+    `Salom, ${ctx.from.first_name}! 👋\n\n` +
+    `Menga:\n` +
+    `1. Qo'shiq nomi yoki matnini yuboring 🎧\n` +
+    `2. Video/Audio fayl yuboring (videodagi musiqani topaman) 📹\n` +
+    `3. Instagram Reels yoki video havolasini yuboring 🔗`
+  );
 });
 
-bot.on('text', async (ctx) => {
-    const text = ctx.message.text.trim();
+// Audio fayldan qo'shiqni tanib olish funksiyasi (AudD API)
+async function recognizeAudio(filePath) {
+  const form = new FormData();
+  form.append('file', fs.createReadStream(filePath));
+  form.append('api_token', AUDD_API_KEY);
+  form.append('return', 'apple_music,spotify');
 
-    // Faqat havola ekanligini tekshiramiz
-    if (!text.includes('http://') && !text.includes('https://')) {
-        return ctx.reply("❌ Iltimos, qo'shiq qidirish uchun so'z yozmang, shunchaki bevosita **YouTube** yoki **Instagram** havolasini (linkini) tashlang!");
+  const response = await axios.post('https://api.audd.io/', form, {
+    headers: form.getHeaders(),
+  });
+
+  return response.data;
+}
+
+// Qo'shiqni YouTube'dan qidirib yuklab berish funksiyasi
+async function downloadAndSendSong(ctx, query, waitingMsg) {
+  try {
+    const searchResults = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+
+    if (!searchResults || searchResults.length === 0) {
+      return ctx.api.editMessageText(
+        ctx.chat.id,
+        waitingMsg.message_id,
+        '❌ Kechirasiz, qo\'shiq nomi topildi, ammo uning audio faylini yuklab bo\'lmadi.'
+      );
     }
 
-    await ctx.reply("⏳ Havola bo'yicha yuklab olinmoqda, biroz kuting...");
+    const video = searchResults[0];
 
-    const downloadsDir = path.join(__dirname, 'downloads');
-    if (!fs.existsSync(downloadsDir)) {
-        fs.mkdirSync(downloadsDir);
-    }
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      waitingMsg.message_id,
+      `🎶 Topildi: **${video.title}**\n⏳ Audio yuklab olinmoqda...`,
+      { parse_mode: 'Markdown' }
+    );
 
-    const outputTemplate = path.join(downloadsDir, '%(id)s.%(ext)s');
+    const stream = await play.stream(video.url, { quality: 2 });
+    const filePath = path.join(__dirname, `song_${Date.now()}.mp3`);
+    const fileStream = fs.createWriteStream(filePath);
 
-    try {
-        await ytDlp(text, {
-            output: outputTemplate,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: '0',
-            noCheckCertificates: true,
-            geoBypass: true,
-            extractorArgs: 'youtube:player_client=android',
-            addHeader: [
-                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            ]
-        });
+    stream.stream.pipe(fileStream);
 
-        const files = fs.readdirSync(downloadsDir);
-        if (files.length === 0) {
-            throw new Error("Fayl topilmadi.");
-        }
+    fileStream.on('finish', async () => {
+      await ctx.replyWithAudio(new InputFile(filePath), {
+        title: video.title,
+        performer: video.channel ? video.channel.name : 'Unknown Artist',
+        caption: `🎵 **${video.title}**\n\n🤖 @${ctx.me.username} orqali yuklandi`,
+        parse_mode: 'Markdown'
+      });
 
-        const latestFile = files.reduce((a, b) => {
-            return fs.statSync(path.join(downloadsDir, a)).mtime > fs.statSync(path.join(downloadsDir, b)).mtime ? a : b;
-        });
+      await ctx.api.deleteMessage(ctx.chat.id, waitingMsg.message_id);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    });
+  } catch (err) {
+    console.error(err);
+    await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Yuklab olishda xatolik yuz berdi.');
+  }
+}
 
-        const filePath = path.join(downloadsDir, latestFile);
+// Video yoki Video-note yuborilganda ishlovchi qism
+bot.on(['message:video', 'message:video_note'], async (ctx) => {
+  const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
-        // Telegramga audio yuborish
-        await ctx.replyWithAudio({ source: fs.createReadStream(filePath) }, { caption: "Mana qo'shiqning to'liq (full) versiyasi! 🎧" });
+  try {
+    const file = await ctx.getFile();
+    const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
 
-        // Faylni serverdan tozalash
-        setTimeout(() => {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        }, 5000);
+    // Vaqtinchalik fayllar yo'li
+    const tempVideo = path.join(__dirname, `temp_${Date.now()}.mp4`);
+    const tempAudio = path.join(__dirname, `temp_${Date.now()}.mp3`);
 
-    } catch (error) {
-        console.error(error);
-        ctx.reply("❌ Kechirasiz, havoladan yuklab bo'lmadi. Havola to'g'riligiga yoki bloklanmaganiga amin bo'ling.");
-    }
+    // Videoni yuklab olish
+    const response = await axios({ url: fileUrl, responseType: 'stream' });
+    const writer = fs.createWriteStream(tempVideo);
+    response.data.pipe(writer);
+
+    writer.on('finish', () => {
+      // Videodan audioni ajratish
+      ffmpeg(tempVideo)
+        .toFormat('mp3')
+        .on('end', async () => {
+          // AudD API orqali qo'shiqni tanish
+          const result = await recognizeAudio(tempAudio);
+
+          // Vaqtinchalik fayllarni o'chirish
+          if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo);
+          if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
+
+          if (result && result.status === 'success' && result.result) {
+            const songName = `${result.result.artist} - ${result.result.title}`;
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              waitingMsg.message_id,
+              `🔍 Topilgan qo'shiq: **${songName}**\n⏳ To'liq audio izlanmoqda...`,
+              { parse_mode: 'Markdown' }
+            );
+            await downloadAndSendSong(ctx, songName, waitingMsg);
+          } else {
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              waitingMsg.message_id,
+              '❌ Kechirasiz, ushbu videodagi musiqa aniqlanmadi.'
+            );
+          }
+        })
+        .on('error', async (err) => {
+          console.error(err);
+          await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Videoni qayta ishlashda xatolik.');
+        })
+        .save(tempAudio);
+    });
+  } catch (error) {
+    console.error(error);
+    await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Xatolik yuz berdi.');
+  }
 });
 
-bot.launch();
-console.log("Bot ishga tushdi!");
+// Matnli xabar va linklar uchun
+bot.on('message:text', async (ctx) => {
+  const text = ctx.message.text;
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  // Oddiy matn orqali qidiruv
+  const waitingMsg = await ctx.reply('🔎 Qo\'shiq qidirilmoqda...');
+  await downloadAndSendSong(ctx, text, waitingMsg);
+});
+
+bot.start();
+console.log('Bot muvaffaqiyatli ishga tushdi!');
