@@ -10,7 +10,7 @@ const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 // BU YERGA O'Z TOKENINGIZNI YOZING:
-const BOT_TOKEN = "8761282938:AAEdtErfM8HGsNisAKgPkO04wCo5Yo3mmFI";
+const BOT_TOKEN = "8761282938:AAEuh8bzgbxDPSVB5eyxSw_cQtMInBXXV0U";
 // BU YERGA AUDD API KALITINGIZNI YOZING:
 const AUDD_API_KEY = "your_audd_api_key_here";
 
@@ -57,7 +57,7 @@ async function downloadAndSendSong(ctx, query, waitingMsg) {
       return ctx.api.editMessageText(
         ctx.chat.id,
         waitingMsg.message_id,
-        '❌ Kechirasiz, qo\'shiq nomi topildi, ammo uning audio faylini yuklab bo\'lmadi.'
+        '❌ Kechirasiz, qo\'shiq topilmadi.'
       );
     }
 
@@ -87,9 +87,23 @@ async function downloadAndSendSong(ctx, query, waitingMsg) {
       await ctx.api.deleteMessage(ctx.chat.id, waitingMsg.message_id);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     });
+
+    fileStream.on('error', async (err) => {
+      console.error('File stream error:', err);
+      await ctx.api.editMessageText(
+        ctx.chat.id, 
+        waitingMsg.message_id, 
+        '⚠️ YouTube serveri Render IP-manzilini blokladi. Audioni yuklab bo\'lmadi.'
+      );
+    });
+
   } catch (err) {
-    console.error(err);
-    await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Yuklab olishda xatolik yuz berdi.');
+    console.error('Download error:', err);
+    await ctx.api.editMessageText(
+      ctx.chat.id, 
+      waitingMsg.message_id, 
+      '⚠️ YouTube cheklovi tufayli yuklab olish imkonsiz (Render IP bloklandi).'
+    );
   }
 }
 
