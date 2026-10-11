@@ -1,16 +1,17 @@
 {
-  "name": "music-bot",
+  "name": "telegram-music-bot",
   "version": "1.0.0",
+  "description": "Telegram Music Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.x.x",
-    "fluent-ffmpeg": "^2.x.x",
-    "ffmpeg-static": "^5.x.x",
-    "form-data": "^4.x.x",
-    "grammy": "^1.x.x",
-    "play-dl": "^1.x.x"
+    "axios": "^1.6.0",
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "form-data": "^4.0.0",
+    "grammy": "^1.20.0",
+    "play-dl": "latest"
   }
 }
