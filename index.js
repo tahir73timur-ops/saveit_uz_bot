@@ -1,18 +1,9 @@
-// Faylning eng tepasida FAQAT 1 MARTA bo'lishi kerak:
 const { Bot, InputFile } = require('grammy');
 const play = require('play-dl');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
-
-// Botingizning qolgan kodi va oxiridagi HTTP server kodi shu yerda qoladi...
-const { Bot, InputFile } = require('grammy');
-const { Bot, InputFile } = require('grammy');
-const play = require('play-dl');
-const axios = require('axios');
-const FormData = require('form-data');
-const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
