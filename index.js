@@ -8,6 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
+// YANGI TOKENGA ALMASHTIRDINGIZ DEB UMID QILAMIZ (409 xatosini oldini olish uchun)
 const BOT_TOKEN = "8761282938:AAElL-TlzFgMKedUUD_6MtWvpW0HwvKOr7E";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
@@ -16,7 +17,7 @@ const bot = new Bot(BOT_TOKEN);
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yoki video yuboring, original qo'shiqlar va ijrochilarni aniq topib beraman! 🎧`
+    `Menga qo'shiq nomini yoki video yuboring, original va haqiqiy ijrochining qo'shig'ini topib beraman! 🎧`
   );
 });
 
@@ -48,12 +49,12 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// Original qo'shiqlarni qidirish uchun iTunes API
+// Haqiqiy va original qo'shiqlarni qidirish uchun iTunes API
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    // limit=15 olib, ichidan eng mos va original (remiks bo'lmagan) 5 tasini saralab olamiz
-    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=15`;
+    // Aniqroq natija olish uchun limitni oshiramiz va original versiyalarni saralaymiz
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=20`;
     
     const response = await axios.get(url, {
       headers: {
@@ -68,14 +69,14 @@ async function searchMusicFromiTunes(query) {
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
         album: track.collectionName || 'Single',
-        // Remiks yoki slowed so'zlari bor-yo'qligini tekshiramiz
-        isRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute/i.test(track.trackName)
+        // Cover, remix, slowed so'zlarini aniqlaymiz
+        isModified: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke/i.test(track.trackName)
       }));
 
-      // Birinchi navbatda original (remiks bo'lmagan) qo'shiqlarni tepaga chiqazamiz
-      tracks.sort((a, b) => a.isRemix - b.isRemix);
+      // Asl (original) versiyalarni birinchi o'ringa chiqazamiz
+      tracks.sort((a, b) => a.isModified - b.isModified);
 
-      // Faqat eng yaxshi 5 tasini qoldiramiz va ID berib chiqamiz
+      // Eng yaxshi 5 ta original qo'shiqni qaytaramiz
       return tracks.slice(0, 5).map((track, index) => ({
         id: index + 1,
         title: track.title,
@@ -101,7 +102,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     await ctx.api.editMessageText(
       ctx.chat.id, 
       waitingMsgId, 
-      '❌ Kechirasiz, hech qanday qo\'shiq topilmadi.'
+      '❌ Kechirasiz, bu qo\'shiq topilmadi.'
     );
     return;
   }
@@ -207,7 +208,7 @@ bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Raqamli tugmalar bosilganda audioni yuborish
+// Raqamli tugmalar bosilganda to'g'ridan-to'g'ri audioni yuborish
 bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
   const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
@@ -223,7 +224,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
 
   if (!selectedTrack.audioUrl) {
     return ctx.answerCallbackQuery({ 
-      text: "❌ Kechirasiz, bu qo'shiq uchun audio mavjud emas.", 
+      text: "❌ Kechirasiz, bu qo'shiq uchun yuklab olish havolasi mavjud emas.", 
       show_alert: true 
     });
   }
@@ -243,6 +244,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   }
 });
 
+// Botni ishga tushirish (dropPendingUpdates ziddiyatlarni oldini oladi)
 bot.start({
   dropPendingUpdates: true,
   onStart: (botInfo) => {
@@ -250,7 +252,7 @@ bot.start({
   }
 });
 
-// Serverni ishga tushirish
+// Render port talabini qondirish uchun server
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
