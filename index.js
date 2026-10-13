@@ -10,7 +10,7 @@ const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 // BU YERGA O'Z TOKENINGIZNI YOZING:
-const BOT_TOKEN = "8761282938:AAEuh8bzgbxDPSVB5eyxSw_cQtMInBXXV0U";
+const BOT_TOKEN = "8761282938:AAEL41cKHFJAv-4FH9quEFvCreWM690FbTo";
 // BU YERGA AUDD API KALITINGIZNI YOZING:
 const AUDD_API_KEY = "your_audd_api_key_here";
 
