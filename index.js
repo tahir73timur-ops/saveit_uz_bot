@@ -8,15 +8,10 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAHg12X3tkQ3DD0UP0adCanYDZn_lRS7Si4";
-const AUDD_API_KEY = "your_audd_api_key_here"; // O'zingizning AudD API kalitingizni yozing
+const BOT_TOKEN = "8761282938:AAE9AD2C-uVTVnxiKMbf6t-kgvXRevFHHds";
+const AUDD_API_KEY = "your_audd_api_key_here";
 
-// drop_pending_updates: true - eski xabarlar va ziddiyatli ulanishlarni tozalaydi (409 xatosining oldini oladi)
-const bot = new Bot(BOT_TOKEN, {
-  client: {
-    // APIso'rovlari vaqti
-  }
-});
+const bot = new Bot(BOT_TOKEN);
 
 bot.command('start', (ctx) => {
   ctx.reply(
@@ -25,7 +20,7 @@ bot.command('start', (ctx) => {
   );
 });
 
-// Millisekundlarni MM:SS formatiga o'tkazish
+// Форматирование времени из миллисекунд в MM:SS
 function formatDurationFromMs(ms) {
   if (!ms) return '3:00';
   const totalSeconds = Math.floor(ms / 1000);
@@ -34,7 +29,7 @@ function formatDurationFromMs(ms) {
   return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 }
 
-// Videoni AudD API orqali tanib olish
+// Распознавание аудио через AudD API
 async function recognizeAudio(filePath) {
   try {
     const form = new FormData();
@@ -48,12 +43,12 @@ async function recognizeAudio(filePath) {
 
     return response.data;
   } catch (err) {
-    console.error("AudD xatolik:", err.message);
+    console.error("AudD Error:", err.message);
     return null;
   }
 }
 
-// iTunes Search API orqali qo'shiq qidirish
+// Поиск музыки через iTunes API
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
@@ -68,8 +63,8 @@ async function searchMusicFromiTunes(query) {
     if (response.data && response.data.results && response.data.results.length > 0) {
       return response.data.results.map((track, index) => ({
         id: index + 1,
-        title: track.trackName || 'Nomaʼlum',
-        artist: track.artistName || 'Nomaʼlum artist',
+        title: track.trackName || 'Без названия',
+        artist: track.artistName || 'Неизвестный исполнитель',
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
         album: track.collectionName || 'Single'
@@ -78,12 +73,12 @@ async function searchMusicFromiTunes(query) {
       return [];
     }
   } catch (error) {
-    console.error("iTunes API xatolik:", error.message);
+    console.error("iTunes API error:", error.message);
     return [];
   }
 }
 
-// Qidiruv natijalarini formatlab yuborish
+// Обработка поиска и отправка меню
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const tracks = await searchMusicFromiTunes(query);
 
@@ -107,14 +102,17 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
 
   const keyboard = new InlineKeyboard();
 
-  // Video tugmasi
+  // Кнопка Video
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // 1 dan 5 gacha raqamli tugmalar
-  tracks.forEach((track) => {
-    keyboard.text(`${track.id}`, `dl_${track.id - 1}`);
+  // Сохраняем поисковый запрос прямо в callback_data кнопок
+  // Формат: dl_<index>_<query>
+  const safeQuery = encodeURIComponent(query.slice(0, 30));
+  tracks.forEach((track, idx) => {
+    keyboard.text(`${track.id}`, `dl_${idx}_${safeQuery}`);
   });
 
+  // Дополнительно дублируем в глобальное хранилище
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -129,7 +127,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
-// Video va video-note yuborilganda
+// Обработка видео и кружочков
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -184,35 +182,41 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Matnli xabar orqali qidirish
+// Текстовый поиск
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// Video tugmasi bosilganda
+// Заглушка для кнопки Video
 bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Raqamli tugmalar bosilganda audioni yuborish
-bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
+// Обработка клика по кнопкам 1-5 (с восстановлением из памяти или повторным поиском)
+bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
-  const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
+  const searchQuery = decodeURIComponent(ctx.match[2]);
 
-  if (!userTracks || !userTracks[trackIndex]) {
-    return ctx.answerCallbackQuery({
-      text: "⚠️ Natijalar topilmadi. Qaytadan qo'shiq qidiring.",
-      show_alert: true
-    });
+  let selectedTrack = null;
+
+  // 1. Проверяем оперативную память
+  if (global.lastSearchResults && global.lastSearchResults[ctx.chat.id]) {
+    selectedTrack = global.lastSearchResults[ctx.chat.id][trackIndex];
   }
 
-  const selectedTrack = userTracks[trackIndex];
+  // 2. Если память очистилась, делаем быстрый повторный поиск
+  if (!selectedTrack) {
+    const refreshedTracks = await searchMusicFromiTunes(searchQuery);
+    if (refreshedTracks && refreshedTracks[trackIndex]) {
+      selectedTrack = refreshedTracks[trackIndex];
+    }
+  }
 
-  if (!selectedTrack.audioUrl) {
+  if (!selectedTrack || !selectedTrack.audioUrl) {
     return ctx.answerCallbackQuery({ 
-      text: "❌ Kechirasiz, bu qo'shiq uchun audio mavjud emas.", 
+      text: "❌ Qo'shiq topilmadi yoki audio havolasi eskirgan. Qaytadan qidiring.", 
       show_alert: true 
     });
   }
@@ -232,15 +236,15 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   }
 });
 
-// 409 xatosini oldini olish uchun dropPendingUpdates: true yordamida ishga tushiramiz
+// Запуск бота с очисткой зависших обновлений
 bot.start({
-  dropPendingUpdates: true, // Eskirgan so'rovlarni tashlab yuboradi va ziddiyatni yo'qotadi
+  dropPendingUpdates: true,
   onStart: (botInfo) => {
     console.log(`Bot @${botInfo.username} muvaffaqiyatli ishga tushdi!`);
   }
 });
 
-// Render port talabini qondirish uchun web server
+// Веб-сервер для поддержания работы на Render
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
