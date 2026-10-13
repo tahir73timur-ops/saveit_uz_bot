@@ -1,5 +1,4 @@
-const { Bot, InputFile } = require('grammy');
-const play = require('play-dl');
+const { Bot, InputFile, InlineKeyboard } = require('grammy');
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
@@ -9,32 +8,23 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// BU YERGA O'Z TOKENINGIZNI YOZING:
-const BOT_TOKEN = "8761282938:AAFDdp95P2drf0M7XAKIhMLTNyrKVfe1LPU";
-// BU YERGA AUDD API KALITINGIZni YOZING:
-const AUDD_API_KEY = "your_audd_api_key_here";
+// Token va API kalitlar
+const BOT_TOKEN = "8761282938:AAHNVvI5CGP8rvY2Jz9vkzhwtXBHhIZL1cc";
+const AUDD_API_KEY = "your_audd_api_key_here"; // O'zingizning AudD API kalitingizni yozing
 
 const bot = new Bot(BOT_TOKEN);
-
-// play-dl sozlamasini faollashtirish
-try {
-  play.authorization();
-} catch (e) {
-  console.log("play-dl auth warning:", e.message);
-}
 
 // /start komandasi
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
     `Menga:\n` +
-    `1. Qo'shiq nomi yoki matnini yuboring 🎧\n` +
-    `2. Video/Audio fayl yuboring (videodagi musiqani topaman) 📹\n` +
-    `3. Instagram Reels yoki video havolasini yuboring 🔗`
+    `1. Qo'shiq nomini yuboring (10 tagacha variant chiqarib beraman) 🎧\n` +
+    `2. Video yoki video-note yuboring (ichidagi musiqani topib beraman) 📹`
   );
 });
 
-// Audio fayldan qo'shiqni tanib olish funksiyasi (AudD API)
+// Videodan audio ajratib olish va AudD orqali tanib olish
 async function recognizeAudio(filePath) {
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));
@@ -48,62 +38,29 @@ async function recognizeAudio(filePath) {
   return response.data;
 }
 
-// Qo'shiqni YouTube'dan qidirib yuklab berish funksiyasi
-async function downloadAndSendSong(ctx, query, waitingMsg) {
+// iTunes API orqali qo'shiq qidirish (10 tagacha natija)
+async function searchMusicFromiTunes(query) {
   try {
-    const searchResults = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+    const formattedQuery = encodeURIComponent(query);
+    // limit=10 qilib belgilaymiz
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=10`;
+    
+    const response = await axios.get(url);
+    const data = response.data;
 
-    if (!searchResults || searchResults.length === 0) {
-      return ctx.api.editMessageText(
-        ctx.chat.id,
-        waitingMsg.message_id,
-        '❌ Kechirasiz, qo\'shiq topilmadi.'
-      );
+    if (data.resultCount > 0) {
+      return data.results.map(track => ({
+        title: track.trackName,
+        artist: track.artistName,
+        audioUrl: track.previewUrl, // 30 soniyalik audio preview
+        album: track.collectionName || 'Album'
+      }));
+    } else {
+      return [];
     }
-
-    const video = searchResults[0];
-
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      waitingMsg.message_id,
-      `🎶 Topildi: **${video.title}**\n⏳ Audio yuklab olinmoqda...`,
-      { parse_mode: 'Markdown' }
-    );
-
-    const stream = await play.stream(video.url, { quality: 2 });
-    const filePath = path.join(__dirname, `song_${Date.now()}.mp3`);
-    const fileStream = fs.createWriteStream(filePath);
-
-    stream.stream.pipe(fileStream);
-
-    fileStream.on('finish', async () => {
-      await ctx.replyWithAudio(new InputFile(filePath), {
-        title: video.title,
-        performer: video.channel ? video.channel.name : 'Unknown Artist',
-        caption: `🎵 **${video.title}**\n\n🤖 @${ctx.me.username} orqali yuklandi`,
-        parse_mode: 'Markdown'
-      });
-
-      await ctx.api.deleteMessage(ctx.chat.id, waitingMsg.message_id);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    });
-
-    fileStream.on('error', async (err) => {
-      console.error('File stream error:', err);
-      await ctx.api.editMessageText(
-        ctx.chat.id, 
-        waitingMsg.message_id, 
-        '⚠️ YouTube serveri Render IP-manzilini blokladi (429 Too Many Requests).'
-      );
-    });
-
-  } catch (err) {
-    console.error('Download error:', err);
-    await ctx.api.editMessageText(
-      ctx.chat.id, 
-      waitingMsg.message_id, 
-      '⚠️ YouTube cheklovi tufayli yuklab olish imkonsiz (Render IP bloklandi).'
-    );
+  } catch (error) {
+    console.error("iTunes API error:", error.message);
+    return [];
   }
 }
 
@@ -136,10 +93,14 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
             await ctx.api.editMessageText(
               ctx.chat.id,
               waitingMsg.message_id,
-              `🔍 Topilgan qo'shiq: **${songName}**\n⏳ To'liq audio izlanmoqda...`,
+              `✨ Topilgan musiqa: **${songName}**\n⏳ Shu nom bo'yicha qo'shiqlar qidirilmoqda...`,
               { parse_mode: 'Markdown' }
             );
-            await downloadAndSendSong(ctx, songName, waitingMsg);
+
+            // Topilgan qo'shiq bo'yicha 10 ta natija chiqarish
+            const tracks = await searchMusicFromiTunes(songName);
+            sendTracksList(ctx, tracks, waitingMsg.message_id);
+
           } else {
             await ctx.api.editMessageText(
               ctx.chat.id,
@@ -150,7 +111,7 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
         })
         .on('error', async (err) => {
           console.error(err);
-          await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Videoni qayta ishlashda xatolik.');
+          await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Videoni qayta ishlashda xatolik yuz berdi.');
         })
         .save(tempAudio);
     });
@@ -160,18 +121,49 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Matnli xabar va linklar uchun
+// Matnli xabar orqali qo'shiq qidirish (Kamida 10 ta chiqazish)
 bot.on('message:text', async (ctx) => {
-  const text = ctx.message.text;
-  const waitingMsg = await ctx.reply('🔎 Qo\'shiq qidirilmoqda...');
-  await downloadAndSendSong(ctx, text, waitingMsg);
+  const query = ctx.message.text;
+  const waitingMsg = await ctx.reply('🔎 10 tagacha qo\'shiq qidirilmoqda...');
+
+  const tracks = await searchMusicFromiTunes(query);
+  sendTracksList(ctx, tracks, waitingMsg.message_id);
 });
+
+// Topilgan qo'shiqlar ro'yxatini yuborish yordamchi funksiyasi
+async function sendTracksList(ctx, tracks, messageId) {
+  if (tracks.length === 0) {
+    await ctx.api.editMessageText(ctx.chat.id, messageId, '❌ Hech qanday qo\'shiq topilmadi.');
+    return;
+  }
+
+  await ctx.api.deleteMessage(ctx.chat.id, messageId);
+
+  // Topilgan har bir qo'shiqni bot orqali yuborish (kamida 10 ta yoki topilganicha)
+  for (let i = 0; i < tracks.length; i++) {
+    const track = tracks[i];
+    try {
+      if (track.audioUrl) {
+        await ctx.replyWithAudio(track.audioUrl, {
+          title: track.title,
+          performer: track.artist,
+          caption: `🎵 **${i + 1}. ${track.title}** - ${track.artist}\n💿 Albom: ${track.album}` ,
+          parse_mode: 'Markdown'
+        });
+      } else {
+        await ctx.reply(`🎵 **${i + 1}. ${track.title}** - ${track.artist} (Audio havolasi mavjud emas)`, { parse_mode: 'Markdown' });
+      }
+    } catch (err) {
+      console.error("Audio yuborishda xatolik:", err.message);
+    }
+  }
+}
 
 // Botni ishga tushirish
 bot.start();
 console.log('Bot muvaffaqiyatli ishga tushdi!');
 
-// Render port talab qilmasligi uchun qo'shimcha server
+// Render / Server port talabini qondirish uchun
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
