@@ -8,7 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// YANGI TOKENGA ALMASHTIRDINGIZ DEB UMID QILAMIZ (409 xatosini oldini olish uchun)
+// BOT TOKENINGIZNI SHU YERGA YOZING
 const BOT_TOKEN = "8761282938:AAElL-TlzFgMKedUUD_6MtWvpW0HwvKOr7E";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
@@ -49,12 +49,12 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// Haqiqiy va original qo'shiqlarni qidirish uchun iTunes API
+// Haqiqiy va original qo'shiqlarni aniq topish uchun funksiya
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    // Aniqroq natija olish uchun limitni oshiramiz va original versiyalarni saralaymiz
-    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=20`;
+    // Ko'proq natija olib, ularning ichidan asl ijrochini saralab olamiz
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=25`;
     
     const response = await axios.get(url, {
       headers: {
@@ -69,14 +69,22 @@ async function searchMusicFromiTunes(query) {
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
         album: track.collectionName || 'Single',
-        // Cover, remix, slowed so'zlarini aniqlaymiz
-        isModified: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke/i.test(track.trackName)
+        // Kaver, remiks, slowed yoki jonli ijrolarni aniqlaymiz
+        isCoverOrRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke|instrumental/i.test(track.trackName)
       }));
 
-      // Asl (original) versiyalarni birinchi o'ringa chiqazamiz
-      tracks.sort((a, b) => a.isModified - b.isModified);
+      // Asl (original) versiyalarni va remiks bo'lmaganlarni birinchi o'ringa chiqazamiz
+      tracks.sort((a, b) => a.isCoverOrRemix - b.isCoverOrRemix);
 
-      // Eng yaxshi 5 ta original qo'shiqni qaytaramiz
+      // Agar qidiruv so'zida artist ismi aniq qatnashgan bo'lsa, o'sha artistga ustunlik beramiz
+      const lowerQuery = query.toLowerCase();
+      tracks.sort((a, b) => {
+        const aMatch = (a.artist.toLowerCase().includes(lowerQuery) || a.title.toLowerCase().includes(lowerQuery)) ? 0 : 1;
+        const bMatch = (b.artist.toLowerCase().includes(lowerQuery) || b.title.toLowerCase().includes(lowerQuery)) ? 0 : 1;
+        return aMatch - bMatch;
+      });
+
+      // Faqat eng aniq va original 5 ta qo'shiqni qaytaramiz
       return tracks.slice(0, 5).map((track, index) => ({
         id: index + 1,
         title: track.title,
@@ -252,7 +260,7 @@ bot.start({
   }
 });
 
-// Render port talabini qondirish uchun server
+// Serverni ishga tushirish
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
