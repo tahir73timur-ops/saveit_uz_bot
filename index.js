@@ -16,7 +16,7 @@ const bot = new Bot(BOT_TOKEN);
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yoki video yuboring, chiroyli ro'yxat tuzib beraman! 🎧`
+    `Menga qo'shiq nomini yoki video yuboring, original qo'shiqlar va ijrochilarni aniq topib beraman! 🎧`
   );
 });
 
@@ -48,11 +48,12 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// iTunes Search API orqali qo'shiq qidirish
+// Original qo'shiqlarni qidirish uchun iTunes API
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=5`;
+    // limit=15 olib, ichidan eng mos va original (remiks bo'lmagan) 5 tasini saralab olamiz
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=15`;
     
     const response = await axios.get(url, {
       headers: {
@@ -61,13 +62,27 @@ async function searchMusicFromiTunes(query) {
     });
 
     if (response.data && response.data.results && response.data.results.length > 0) {
-      return response.data.results.map((track, index) => ({
-        id: index + 1,
+      let tracks = response.data.results.map((track) => ({
         title: track.trackName || 'Nomaʼlum',
         artist: track.artistName || 'Nomaʼlum artist',
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
-        album: track.collectionName || 'Single'
+        album: track.collectionName || 'Single',
+        // Remiks yoki slowed so'zlari bor-yo'qligini tekshiramiz
+        isRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute/i.test(track.trackName)
+      }));
+
+      // Birinchi navbatda original (remiks bo'lmagan) qo'shiqlarni tepaga chiqazamiz
+      tracks.sort((a, b) => a.isRemix - b.isRemix);
+
+      // Faqat eng yaxshi 5 tasini qoldiramiz va ID berib chiqamiz
+      return tracks.slice(0, 5).map((track, index) => ({
+        id: index + 1,
+        title: track.title,
+        artist: track.artist,
+        audioUrl: track.audioUrl,
+        duration: track.duration,
+        album: track.album
       }));
     } else {
       return [];
@@ -105,7 +120,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   // Video tugmasi
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // Har bir tugmaga to'g'ridan-to'g'ri indeksi yozamiz (dl_0, dl_1, dl_2, dl_3, dl_4)
+  // 1 dan 5 gacha raqamli tugmalar
   tracks.forEach((track, idx) => {
     keyboard.text(`${track.id}`, `dl_${idx}`);
   });
