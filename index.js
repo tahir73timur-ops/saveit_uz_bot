@@ -10,8 +10,8 @@ const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 // BU YERGA O'Z TOKENINGIZNI YOZING:
-const BOT_TOKEN = "8761282938:AAEL41cKHFJAv-4FH9quEFvCreWM690FbTo";
-// BU YERGA AUDD API KALITINGIZNI YOZING:
+const BOT_TOKEN = "8761282938:AAFDdp95P2drf0M7XAKIhMLTNyrKVfe1LPU";
+// BU YERGA AUDD API KALITINGIZni YOZING:
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
@@ -93,7 +93,7 @@ async function downloadAndSendSong(ctx, query, waitingMsg) {
       await ctx.api.editMessageText(
         ctx.chat.id, 
         waitingMsg.message_id, 
-        '⚠️ YouTube serveri Render IP-manzilini blokladi. Audioni yuklab bo\'lmadi.'
+        '⚠️ YouTube serveri Render IP-manzilini blokladi (429 Too Many Requests).'
       );
     });
 
@@ -115,24 +115,19 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
     const file = await ctx.getFile();
     const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
 
-    // Vaqtinchalik fayllar yo'li
     const tempVideo = path.join(__dirname, `temp_${Date.now()}.mp4`);
     const tempAudio = path.join(__dirname, `temp_${Date.now()}.mp3`);
 
-    // Videoni yuklab olish
     const response = await axios({ url: fileUrl, responseType: 'stream' });
     const writer = fs.createWriteStream(tempVideo);
     response.data.pipe(writer);
 
     writer.on('finish', () => {
-      // Videodan audioni ajratish
       ffmpeg(tempVideo)
         .toFormat('mp3')
         .on('end', async () => {
-          // AudD API orqali qo'shiqni tanish
           const result = await recognizeAudio(tempAudio);
 
-          // Vaqtinchalik fayllarni o'chirish
           if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo);
           if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
 
@@ -168,13 +163,11 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
 // Matnli xabar va linklar uchun
 bot.on('message:text', async (ctx) => {
   const text = ctx.message.text;
-
-  // Oddiy matn orqali qidiruv
   const waitingMsg = await ctx.reply('🔎 Qo\'shiq qidirilmoqda...');
   await downloadAndSendSong(ctx, text, waitingMsg);
 });
 
-// Botni ishga tushirish (FAQAT 1 MARTA)
+// Botni ishga tushirish
 bot.start();
 console.log('Bot muvaffaqiyatli ishga tushdi!');
 
