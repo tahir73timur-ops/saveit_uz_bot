@@ -8,10 +8,15 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAEnK4qKlFOGxbl-a5doTMUS1tJdU8JKP4w";
+const BOT_TOKEN = "8761282938:AAHg12X3tkQ3DD0UP0adCanYDZn_lRS7Si4";
 const AUDD_API_KEY = "your_audd_api_key_here"; // O'zingizning AudD API kalitingizni yozing
 
-const bot = new Bot(BOT_TOKEN);
+// drop_pending_updates: true - eski xabarlar va ziddiyatli ulanishlarni tozalaydi (409 xatosining oldini oladi)
+const bot = new Bot(BOT_TOKEN, {
+  client: {
+    // APIso'rovlari vaqti
+  }
+});
 
 bot.command('start', (ctx) => {
   ctx.reply(
@@ -48,7 +53,7 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// iTunes Search API orqali qo'shiq qidirish (barqaror ishlaydi)
+// iTunes Search API orqali qo'shiq qidirish
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
@@ -110,7 +115,6 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     keyboard.text(`${track.id}`, `dl_${track.id - 1}`);
   });
 
-  // Natijalarni vaqtincha saqlash
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -228,10 +232,15 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   }
 });
 
-bot.start();
-console.log('Bot muvaffaqiyatli ishga tushdi!');
+// 409 xatosini oldini olish uchun dropPendingUpdates: true yordamida ishga tushiramiz
+bot.start({
+  dropPendingUpdates: true, // Eskirgan so'rovlarni tashlab yuboradi va ziddiyatni yo'qotadi
+  onStart: (botInfo) => {
+    console.log(`Bot @${botInfo.username} muvaffaqiyatli ishga tushdi!`);
+  }
+});
 
-// Render yoki boshqa hostinglar port talabini qondirish uchun
+// Render port talabini qondirish uchun web server
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
