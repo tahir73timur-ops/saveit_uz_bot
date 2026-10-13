@@ -8,7 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAE9AD2C-uVTVnxiKMbf6t-kgvXRevFHHds";
+const BOT_TOKEN = "8761282938:AAElL-TlzFgMKedUUD_6MtWvpW0HwvKOr7E";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
@@ -20,7 +20,7 @@ bot.command('start', (ctx) => {
   );
 });
 
-// Форматирование времени из миллисекунд в MM:SS
+// Millisekundlarni MM:SS formatiga o'tkazish
 function formatDurationFromMs(ms) {
   if (!ms) return '3:00';
   const totalSeconds = Math.floor(ms / 1000);
@@ -29,7 +29,7 @@ function formatDurationFromMs(ms) {
   return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 }
 
-// Распознавание аудио через AudD API
+// Videoni AudD API orqali tanib olish
 async function recognizeAudio(filePath) {
   try {
     const form = new FormData();
@@ -43,12 +43,12 @@ async function recognizeAudio(filePath) {
 
     return response.data;
   } catch (err) {
-    console.error("AudD Error:", err.message);
+    console.error("AudD xatolik:", err.message);
     return null;
   }
 }
 
-// Поиск музыки через iTunes API
+// iTunes Search API orqali qo'shiq qidirish
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
@@ -63,8 +63,8 @@ async function searchMusicFromiTunes(query) {
     if (response.data && response.data.results && response.data.results.length > 0) {
       return response.data.results.map((track, index) => ({
         id: index + 1,
-        title: track.trackName || 'Без названия',
-        artist: track.artistName || 'Неизвестный исполнитель',
+        title: track.trackName || 'Nomaʼlum',
+        artist: track.artistName || 'Nomaʼlum artist',
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
         album: track.collectionName || 'Single'
@@ -73,12 +73,12 @@ async function searchMusicFromiTunes(query) {
       return [];
     }
   } catch (error) {
-    console.error("iTunes API error:", error.message);
+    console.error("iTunes API xatolik:", error.message);
     return [];
   }
 }
 
-// Обработка поиска и отправка меню
+// Qidiruv natijalarini formatlab yuborish
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const tracks = await searchMusicFromiTunes(query);
 
@@ -102,17 +102,15 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
 
   const keyboard = new InlineKeyboard();
 
-  // Кнопка Video
+  // Video tugmasi
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // Сохраняем поисковый запрос прямо в callback_data кнопок
-  // Формат: dl_<index>_<query>
-  const safeQuery = encodeURIComponent(query.slice(0, 30));
+  // Har bir tugmaga to'g'ridan-to'g'ri indeksi yozamiz (dl_0, dl_1, dl_2, dl_3, dl_4)
   tracks.forEach((track, idx) => {
-    keyboard.text(`${track.id}`, `dl_${idx}_${safeQuery}`);
+    keyboard.text(`${track.id}`, `dl_${idx}`);
   });
 
-  // Дополнительно дублируем в глобальное хранилище
+  // Natijalarni xotirada saqlaymiz
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -127,7 +125,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
-// Обработка видео и кружочков
+// Video va video-note yuborilganda
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -182,41 +180,35 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Текстовый поиск
+// Matnli xabar orqali qidirish
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// Заглушка для кнопки Video
+// Video tugmasi bosilganda
 bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Обработка клика по кнопкам 1-5 (с восстановлением из памяти или повторным поиском)
-bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
+// Raqamli tugmalar bosilganda audioni yuborish
+bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
-  const searchQuery = decodeURIComponent(ctx.match[2]);
+  const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
 
-  let selectedTrack = null;
-
-  // 1. Проверяем оперативную память
-  if (global.lastSearchResults && global.lastSearchResults[ctx.chat.id]) {
-    selectedTrack = global.lastSearchResults[ctx.chat.id][trackIndex];
+  if (!userTracks || !userTracks[trackIndex]) {
+    return ctx.answerCallbackQuery({
+      text: "⚠️ Natijalar eskirgan yoki topilmadi. Qaytadan qo'shiq qidiring.",
+      show_alert: true
+    });
   }
 
-  // 2. Если память очистилась, делаем быстрый повторный поиск
-  if (!selectedTrack) {
-    const refreshedTracks = await searchMusicFromiTunes(searchQuery);
-    if (refreshedTracks && refreshedTracks[trackIndex]) {
-      selectedTrack = refreshedTracks[trackIndex];
-    }
-  }
+  const selectedTrack = userTracks[trackIndex];
 
-  if (!selectedTrack || !selectedTrack.audioUrl) {
+  if (!selectedTrack.audioUrl) {
     return ctx.answerCallbackQuery({ 
-      text: "❌ Qo'shiq topilmadi yoki audio havolasi eskirgan. Qaytadan qidiring.", 
+      text: "❌ Kechirasiz, bu qo'shiq uchun audio mavjud emas.", 
       show_alert: true 
     });
   }
@@ -236,7 +228,6 @@ bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
   }
 });
 
-// Запуск бота с очисткой зависших обновлений
 bot.start({
   dropPendingUpdates: true,
   onStart: (botInfo) => {
@@ -244,7 +235,7 @@ bot.start({
   }
 });
 
-// Веб-сервер для поддержания работы на Render
+// Serverni ishga tushirish
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
