@@ -8,26 +8,26 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAGoKsouBVNZX0jsbQH-ndjIAzsj1QGERxE";
+const BOT_TOKEN = "8761282938:AAHD2Khl59MTiUNz5DH6CHwGkWO0KvfPIcg";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
 
 bot.command('start', (ctx) => {
   ctx.reply(
-    `Salom, ${ctx.from.first_name}! 👋\n\n` +
+    `Salom, \${ctx.from.first_name}! 👋\n\n` +
     `Menga qo'shiq nomini yoki video yuboring, xuddi rasmda ko'rsatilgandek chiroyli ro'yxat tuzib beraman! 🎧`
   );
 });
 
-// Секундаларни MM:SS formatiga o'tkazish funksiyasi
+// Saniyeyi MM:SS formatına dönüştüren fonksiyon
 function formatDuration(seconds) {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
+  return `\${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
 }
 
-// Videodan audio ajratish va AudD orqali tanib olish
+// Videodan ses çıkarma ve AudD API ile tanıma
 async function recognizeAudio(filePath) {
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));
@@ -41,11 +41,11 @@ async function recognizeAudio(filePath) {
   return response.data;
 }
 
-// Deezer API orqali qo'shiq qidirish
+// Deezer API üzerinden şarkı arama
 async function searchMusicFromDeezer(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    const url = `https://api.deezer.com/search?q=${formattedQuery}&limit=5`; // 5 talik yoki 10 talik
+    const url = `https://api.deezer.com/search?q=\${formattedQuery}&limit=5`;
     
     const response = await axios.get(url);
     const data = response.data;
@@ -56,7 +56,7 @@ async function searchMusicFromDeezer(query) {
         title: track.title,
         artist: track.artist.name,
         audioUrl: track.preview,
-        duration: formatDuration(track.duration), // Davomiyligi (MM:SS)
+        duration: formatDuration(track.duration),
         album: track.album.title
       }));
     } else {
@@ -68,7 +68,7 @@ async function searchMusicFromDeezer(query) {
   }
 }
 
-// Xuddi rasmldagidek formatda xabar va tugmalarni yuborish
+// Şablon dizileri düzeltilmiş arama ve yanıt fonksiyonu
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const tracks = await searchMusicFromDeezer(query);
 
@@ -81,9 +81,10 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     return;
   }
 
-  const mainTrack = tracks[0]; // Asosiy sarlavha uchun birinchi topilgan qo'shiq
-  let messageText = `🎵 **${mainTrack.artist} — ${mainTrack.title}**\n\n`;
+  const mainTrack = tracks[0];
+  let messageText = `🎵 **${mainTrack.artist} —${mainTrack.title}**\n\n`;
 
+  // Backtick (`) kullanılarak süre değişkeni doğru şekilde bağlandı
   tracks.forEach((track) => {
     messageText += `${track.id}. ${track.title} — *${track.artist}*  \`\${track.duration}\`\n`;
   });
@@ -92,12 +93,12 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
 
   const keyboard = new InlineKeyboard();
 
-  // 1-qator: "Video" tugmasi (skrinshodagidek)
+  // 1. Satır: Video butonu
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // 2-qator: Raqamli tugmalar (1 dan 5 gacha)
+  // 2. Satır: 1-5 arası rakam butonları
   tracks.forEach((track) => {
-    keyboard.text(`${track.id}`, `dl_${track.id - 1}_${encodeURIComponent(query)}`);
+    keyboard.text(`${track.id}`, `dl_${track.id - 1}`);
   });
 
   global.lastSearchResults = global.lastSearchResults || {};
@@ -114,6 +115,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
+// Video ve Video Note işleyici
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -168,19 +170,20 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
+// Metin mesajı işleyici
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// "Video" tugmasi bosilganda xabar berish
+// Video butonu bildirimi
 bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Raqamli tugmalar bosilganda audioni yuborish
-bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
+// Rakam butonlarına tıklandığında müziği gönderme
+bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
   const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
 
