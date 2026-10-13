@@ -8,71 +8,81 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAHD2Khl59MTiUNz5DH6CHwGkWO0KvfPIcg";
-const AUDD_API_KEY = "your_audd_api_key_here";
+const BOT_TOKEN = "8761282938:AAEnK4qKlFOGxbl-a5doTMUS1tJdU8JKP4w";
+const AUDD_API_KEY = "your_audd_api_key_here"; // O'zingizning AudD API kalitingizni yozing
 
 const bot = new Bot(BOT_TOKEN);
 
 bot.command('start', (ctx) => {
   ctx.reply(
-    `Salom, \${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yoki video yuboring, xuddi rasmda ko'rsatilgandek chiroyli ro'yxat tuzib beraman! 🎧`
+    `Salom, ${ctx.from.first_name}! 👋\n\n` +
+    `Menga qo'shiq nomini yoki video yuboring, chiroyli ro'yxat tuzib beraman! 🎧`
   );
 });
 
-// Saniyeyi MM:SS formatına dönüştüren fonksiyon
-function formatDuration(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `\${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
+// Millisekundlarni MM:SS formatiga o'tkazish
+function formatDurationFromMs(ms) {
+  if (!ms) return '3:00';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 }
 
-// Videodan ses çıkarma ve AudD API ile tanıma
+// Videoni AudD API orqali tanib olish
 async function recognizeAudio(filePath) {
-  const form = new FormData();
-  form.append('file', fs.createReadStream(filePath));
-  form.append('api_token', AUDD_API_KEY);
-  form.append('return', 'apple_music,spotify');
+  try {
+    const form = new FormData();
+    form.append('file', fs.createReadStream(filePath));
+    form.append('api_token', AUDD_API_KEY);
+    form.append('return', 'apple_music,spotify');
 
-  const response = await axios.post('https://api.audd.io/', form, {
-    headers: form.getHeaders(),
-  });
+    const response = await axios.post('https://api.audd.io/', form, {
+      headers: form.getHeaders(),
+    });
 
-  return response.data;
+    return response.data;
+  } catch (err) {
+    console.error("AudD xatolik:", err.message);
+    return null;
+  }
 }
 
-// Deezer API üzerinden şarkı arama
-async function searchMusicFromDeezer(query) {
+// iTunes Search API orqali qo'shiq qidirish (barqaror ishlaydi)
+async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    const url = `https://api.deezer.com/search?q=\${formattedQuery}&limit=5`;
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=5`;
     
-    const response = await axios.get(url);
-    const data = response.data;
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      }
+    });
 
-    if (data.data && data.data.length > 0) {
-      return data.data.map((track, index) => ({
+    if (response.data && response.data.results && response.data.results.length > 0) {
+      return response.data.results.map((track, index) => ({
         id: index + 1,
-        title: track.title,
-        artist: track.artist.name,
-        audioUrl: track.preview,
-        duration: formatDuration(track.duration),
-        album: track.album.title
+        title: track.trackName || 'Nomaʼlum',
+        artist: track.artistName || 'Nomaʼlum artist',
+        audioUrl: track.previewUrl,
+        duration: formatDurationFromMs(track.trackTimeMillis),
+        album: track.collectionName || 'Single'
       }));
     } else {
       return [];
     }
   } catch (error) {
-    console.error("Deezer API error:", error.message);
+    console.error("iTunes API xatolik:", error.message);
     return [];
   }
 }
 
-// Şablon dizileri düzeltilmiş arama ve yanıt fonksiyonu
+// Qidiruv natijalarini formatlab yuborish
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
-  const tracks = await searchMusicFromDeezer(query);
+  const tracks = await searchMusicFromiTunes(query);
 
-  if (tracks.length === 0) {
+  if (!tracks || tracks.length === 0) {
     await ctx.api.editMessageText(
       ctx.chat.id, 
       waitingMsgId, 
@@ -82,9 +92,8 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   }
 
   const mainTrack = tracks[0];
-  let messageText = `🎵 **${mainTrack.artist} —${mainTrack.title}**\n\n`;
+  let messageText = `🎵 **${mainTrack.artist} — ${mainTrack.title}**\n\n`;
 
-  // Backtick (`) kullanılarak süre değişkeni doğru şekilde bağlandı
   tracks.forEach((track) => {
     messageText += `${track.id}. ${track.title} — *${track.artist}*  \`\${track.duration}\`\n`;
   });
@@ -93,14 +102,15 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
 
   const keyboard = new InlineKeyboard();
 
-  // 1. Satır: Video butonu
+  // Video tugmasi
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // 2. Satır: 1-5 arası rakam butonları
+  // 1 dan 5 gacha raqamli tugmalar
   tracks.forEach((track) => {
     keyboard.text(`${track.id}`, `dl_${track.id - 1}`);
   });
 
+  // Natijalarni vaqtincha saqlash
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -115,7 +125,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
-// Video ve Video Note işleyici
+// Video va video-note yuborilganda
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -170,19 +180,19 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Metin mesajı işleyici
+// Matnli xabar orqali qidirish
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// Video butonu bildirimi
+// Video tugmasi bosilganda
 bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Rakam butonlarına tıklandığında müziği gönderme
+// Raqamli tugmalar bosilganda audioni yuborish
 bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
   const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
@@ -221,6 +231,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
 bot.start();
 console.log('Bot muvaffaqiyatli ishga tushdi!');
 
+// Render yoki boshqa hostinglar port talabini qondirish uchun
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -229,5 +240,5 @@ const server = http.createServer((req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT}`);
+  console.log(`Server ${PORT}-portda ishlamoqda`);
 });
