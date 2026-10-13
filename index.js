@@ -13,16 +13,14 @@ const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
 
-// Global xotira (foydalanuvchining oxirgi qidiruv natijalari)
-const userSearchCache = {};
-
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yuboring, 10 ta natija chiqaraman va raqamni bossangiz yuklab beraman! 🎧`
+    `Menga qo'shiq nomini yuboring, 10 ta natija chiqaraman va raqamni bossangiz to'g'ridan-to'g'ri yuklab beraman! 🎧`
   );
 });
 
+// Videodan audio ajratish va AudD orqali tanib olish
 async function recognizeAudio(filePath) {
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));
@@ -36,33 +34,35 @@ async function recognizeAudio(filePath) {
   return response.data;
 }
 
-async function searchMusicFromiTunes(query) {
+// Deezer API orqali 10 ta qo'shiq qidirish (To'liq MP3 preview bilan)
+async function searchMusicFromDeezer(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=10`;
+    const url = `https://api.deezer.com/search?q=${formattedQuery}&limit=10`;
     
     const response = await axios.get(url);
     const data = response.data;
 
-    if (data.resultCount > 0) {
-      return data.results.map((track, index) => ({
+    if (data.data && data.data.length > 0) {
+      return data.data.map((track, index) => ({
         id: index + 1,
-        title: track.trackName || 'Nomaʼlum',
-        artist: track.artistName || 'Nomaʼlum artist',
-        audioUrl: track.previewUrl,
-        album: track.collectionName || 'Single'
+        title: track.title,
+        artist: track.artist.name,
+        audioUrl: track.preview, // MP3 audio havolasi
+        album: track.album.title
       }));
     } else {
       return [];
     }
   } catch (error) {
-    console.error("iTunes API error:", error.message);
+    console.error("Deezer API error:", error.message);
     return [];
   }
 }
 
+// Kesh o'rniga qidiruv so'rovini va trek ma'lumotini callback_data ga yashiramiz
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
-  const tracks = await searchMusicFromiTunes(query);
+  const tracks = await searchMusicFromDeezer(query);
 
   if (tracks.length === 0) {
     await ctx.api.editMessageText(
@@ -73,21 +73,25 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     return;
   }
 
-  // Foydalanuvchiga mos natijalarni saqlaymiz
-  userSearchCache[ctx.chat.id] = tracks;
-
   let messageText = `🔍 **"${query}"** bo'yicha topilgan qo'shiqlar:\n\n`;
   const keyboard = new InlineKeyboard();
 
   tracks.forEach((track, idx) => {
     messageText += `**${track.id}.** ${track.title} — *${track.artist}*\n`;
-    keyboard.text(`${track.id}`, `dl_${track.id}`);
+    
+    // Callback data ichiga qaysi qo'shiq ekanligini va qidiruv so'rovini qisqartirib yozamiz
+    // Masalan: idx_0, idx_1 ... idx_9
+    keyboard.text(`${track.id}`, `dl_${idx}_${encodeURIComponent(query)}`);
     if ((idx + 1) % 5 === 0) {
       keyboard.row();
     }
   });
 
   messageText += `\n👇 **Yuklab olish uchun raqamni bosing:**`;
+
+  // Natijalarni vaqtinchalik saqlab turish uchun global masivga yozib qo'yamiz (har bir chat uchun alohida)
+  global.lastSearchResults = global.lastSearchResults || {};
+  global.lastSearchResults[ctx.chat.id] = tracks;
 
   await ctx.api.editMessageText(
     ctx.chat.id,
@@ -161,20 +165,21 @@ bot.on('message:text', async (ctx) => {
 });
 
 // Tugma bosilganda ishlaydigan qism
-bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
-  const trackId = parseInt(ctx.match[1]);
-  const userTracks = userSearchCache[ctx.chat.id];
+bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
+  const trackIndex = parseInt(ctx.match[1]);
+  
+  const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
 
-  if (!userTracks) {
+  if (!userTracks || !userTracks[trackIndex]) {
     return ctx.answerCallbackQuery({
-      text: "⚠️ Natijalar eskirgan. Qaytadan qo'shiq qidiring.",
+      text: "⚠️ Natijalar topilmadi. Qaytadan qo'shiq qidiring.",
       show_alert: true
     });
   }
 
-  const selectedTrack = userTracks.find(t => t.id === trackId);
+  const selectedTrack = userTracks[trackIndex];
 
-  if (!selectedTrack || !selectedTrack.audioUrl) {
+  if (!selectedTrack.audioUrl) {
     return ctx.answerCallbackQuery({ 
       text: "❌ Kechirasiz, bu qo'shiq uchun audio mavjud emas.", 
       show_alert: true 
@@ -184,7 +189,6 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: `⏳ ${selectedTrack.title} yuborilmoqda...` });
 
   try {
-    // Audioni to'g'ridan-to'g'ri yuborish
     await ctx.replyWithAudio(selectedTrack.audioUrl, {
       title: selectedTrack.title,
       performer: selectedTrack.artist,
@@ -193,7 +197,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
     });
   } catch (err) {
     console.error("Audio yuborishda xatolik:", err.message);
-    await ctx.reply("⚠️ Audioni yuborishda xatolik yuz berdi. Boshqa qo'shiqni tanlab ko'ring.");
+    await ctx.reply("⚠️ Audioni yuborishda xatolik yuz berdi.");
   }
 });
 
