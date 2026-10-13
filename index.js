@@ -16,9 +16,16 @@ const bot = new Bot(BOT_TOKEN);
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yuboring, 10 ta natija chiqaraman va raqamni bossangiz to'g'ridan-to'g'ri yuklab beraman! 🎧`
+    `Menga qo'shiq nomini yoki video yuboring, xuddi rasmda ko'rsatilgandek chiroyli ro'yxat tuzib beraman! 🎧`
   );
 });
+
+// Секундаларни MM:SS formatiga o'tkazish funksiyasi
+function formatDuration(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
+}
 
 // Videodan audio ajratish va AudD orqali tanib olish
 async function recognizeAudio(filePath) {
@@ -34,11 +41,11 @@ async function recognizeAudio(filePath) {
   return response.data;
 }
 
-// Deezer API orqali 10 ta qo'shiq qidirish (To'liq MP3 preview bilan)
+// Deezer API orqali qo'shiq qidirish
 async function searchMusicFromDeezer(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    const url = `https://api.deezer.com/search?q=${formattedQuery}&limit=10`;
+    const url = `https://api.deezer.com/search?q=${formattedQuery}&limit=5`; // 5 talik yoki 10 talik
     
     const response = await axios.get(url);
     const data = response.data;
@@ -48,7 +55,8 @@ async function searchMusicFromDeezer(query) {
         id: index + 1,
         title: track.title,
         artist: track.artist.name,
-        audioUrl: track.preview, // MP3 audio havolasi
+        audioUrl: track.preview,
+        duration: formatDuration(track.duration), // Davomiyligi (MM:SS)
         album: track.album.title
       }));
     } else {
@@ -60,7 +68,7 @@ async function searchMusicFromDeezer(query) {
   }
 }
 
-// Kesh o'rniga qidiruv so'rovini va trek ma'lumotini callback_data ga yashiramiz
+// Xuddi rasmldagidek formatda xabar va tugmalarni yuborish
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const tracks = await searchMusicFromDeezer(query);
 
@@ -73,23 +81,25 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     return;
   }
 
-  let messageText = `🔍 **"${query}"** bo'yicha topilgan qo'shiqlar:\n\n`;
-  const keyboard = new InlineKeyboard();
+  const mainTrack = tracks[0]; // Asosiy sarlavha uchun birinchi topilgan qo'shiq
+  let messageText = `🎵 **${mainTrack.artist} — ${mainTrack.title}**\n\n`;
 
-  tracks.forEach((track, idx) => {
-    messageText += `**${track.id}.** ${track.title} — *${track.artist}*\n`;
-    
-    // Callback data ichiga qaysi qo'shiq ekanligini va qidiruv so'rovini qisqartirib yozamiz
-    // Masalan: idx_0, idx_1 ... idx_9
-    keyboard.text(`${track.id}`, `dl_${idx}_${encodeURIComponent(query)}`);
-    if ((idx + 1) % 5 === 0) {
-      keyboard.row();
-    }
+  tracks.forEach((track) => {
+    messageText += `${track.id}. ${track.title} — *${track.artist}*  \`\${track.duration}\`\n`;
   });
 
-  messageText += `\n👇 **Yuklab olish uchun raqamni bosing:**`;
+  messageText += `\n#MusicLovers`;
 
-  // Natijalarni vaqtinchalik saqlab turish uchun global masivga yozib qo'yamiz (har bir chat uchun alohida)
+  const keyboard = new InlineKeyboard();
+
+  // 1-qator: "Video" tugmasi (skrinshodagidek)
+  keyboard.text("🎬 Video", "dummy_video").row();
+
+  // 2-qator: Raqamli tugmalar (1 dan 5 gacha)
+  tracks.forEach((track) => {
+    keyboard.text(`${track.id}`, `dl_${track.id - 1}_${encodeURIComponent(query)}`);
+  });
+
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -160,14 +170,18 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
 
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
-  const waitingMsg = await ctx.reply('🔎 10 ta qo\'shiq qidirilmoqda...');
+  const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// Tugma bosilganda ishlaydigan qism
+// "Video" tugmasi bosilganda xabar berish
+bot.callbackQuery("dummy_video", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
+});
+
+// Raqamli tugmalar bosilganda audioni yuborish
 bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
-  
   const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
 
   if (!userTracks || !userTracks[trackIndex]) {
@@ -192,7 +206,7 @@ bot.callbackQuery(/^dl_(\d+)_(.*)\$/, async (ctx) => {
     await ctx.replyWithAudio(selectedTrack.audioUrl, {
       title: selectedTrack.title,
       performer: selectedTrack.artist,
-      caption: `🎵 **${selectedTrack.title}** — ${selectedTrack.artist}\n💿 Albom: ${selectedTrack.album}\n\n🤖 @${ctx.me.username}`,
+      caption: `🎵 **${selectedTrack.title}** — ${selectedTrack.artist}\n🤖 @${ctx.me.username}`,
       parse_mode: 'Markdown'
     });
   } catch (err) {
