@@ -8,7 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAHrS877l-bY4wBnOx7sQFGMUqfClgevCak";
+const BOT_TOKEN = "8761282938:AAG3AyJJplkLHnsxjBI1MdxF7NeLHQ9bNxc";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
@@ -16,20 +16,20 @@ const bot = new Bot(BOT_TOKEN);
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yoki video yuboring, original va haqiqiy ijrochining to'liq qo'shig'ini topib beraman! 🎧`
+    `Menga qo'shiq nomini yoki video yuboring, original va haqiqiy ijrochining qo'shig'ini topib beraman! 🎧`
   );
 });
 
-// Форматирование времени из миллисекунд в MM:SS
+// Millisekundlarni MM:SS formatiga o'tkazish
 function formatDurationFromMs(ms) {
-  if (!ms) return '3:00';
+  if (!ms) return '03:00';
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  return `${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 }
 
-// Распознавание аудио через AudD API
+// Videoni AudD API orqali tanib olish
 async function recognizeAudio(filePath) {
   try {
     const form = new FormData();
@@ -48,12 +48,11 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// Поиск оригинальных треков через iTunes API (до 10 результатов)
+// Qo'shiqning haqiqiy egasi va davomiyligi (minuti) bilan topish
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    // Запрашиваем 40 результатов для качественной фильтрации оригинала
-    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=40`;
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=30`;
     
     const response = await axios.get(url, {
       headers: {
@@ -68,14 +67,14 @@ async function searchMusicFromiTunes(query) {
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
         album: track.collectionName || 'Single',
-        // Проверка на каверы, ремиксы и замедленные версии
-        isCoverOrRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke|instrumental/i.test(track.trackName)
+        // Remiks, kaver, slowed va boshqa o'zgartirilgan versiyalarni aniqlash
+        isRemixOrCover: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke|instrumental/i.test(track.trackName)
       }));
 
-      // Сортировка: оригинальные версии помещаются выше ремиксов
-      tracks.sort((a, b) => a.isCoverOrRemix - b.isCoverOrRemix);
+      // Asl (original) qo'shiq va haqiqiy ijrochini birinchi o'ringa saralash
+      tracks.sort((a, b) => a.isRemixOrCover - b.isRemixOrCover);
 
-      // Приоритет по совпадению поискового запроса с исполнителем
+      // Qidiruv so'ziga eng mosini ustun qo'yish
       const lowerQuery = query.toLowerCase();
       tracks.sort((a, b) => {
         const aMatch = (a.artist.toLowerCase().includes(lowerQuery) || a.title.toLowerCase().includes(lowerQuery)) ? 0 : 1;
@@ -83,7 +82,7 @@ async function searchMusicFromiTunes(query) {
         return aMatch - bMatch;
       });
 
-      // Возвращаем до 10 точных результатов
+      // 10 ta eng yaxshi original natijani qaytarish
       return tracks.slice(0, 10).map((track, index) => ({
         id: index + 1,
         title: track.title,
@@ -101,7 +100,7 @@ async function searchMusicFromiTunes(query) {
   }
 }
 
-// Обработка запроса и формирование меню
+// Natijalarni formatlab chiqarish
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const tracks = await searchMusicFromiTunes(query);
 
@@ -109,7 +108,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     await ctx.api.editMessageText(
       ctx.chat.id, 
       waitingMsgId, 
-      '❌ Kechirasiz, bu qo\'shiq topilmadi.'
+      '❌ Kechirasiz, hech qanday qo\'shiq topilmadi.'
     );
     return;
   }
@@ -117,18 +116,19 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const mainTrack = tracks[0];
   let messageText = `🎵 **${mainTrack.artist} — ${mainTrack.title}**\n\n`;
 
+  // Har bir qo'shiq yonida daqiqasi (minuti) va haqiqiy egasi chiqariladi
   tracks.forEach((track) => {
-    messageText += `${track.id}. ${track.title} — *${track.artist}*  \`\${track.duration}\`\n`;
+    messageText += `${track.id}. ${track.artist} — *${track.title}*  \`[\${track.duration}]\`\n`;
   });
 
   messageText += `\n#MusicLovers`;
 
   const keyboard = new InlineKeyboard();
 
-  // Кнопка Видео
+  // Video tugmasi
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // Кнопки от 1 до 10 (по 5 кнопок в ряд)
+  // 1 dan 10 gacha tugmalar (har qatorda 5 tadan)
   tracks.forEach((track, idx) => {
     keyboard.text(`${track.id}`, `dl_${idx}`);
     if ((idx + 1) % 5 === 0) {
@@ -136,7 +136,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
     }
   });
 
-  // Сохранение результатов в глобальной памяти
+  // Xotirada saqlash
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -151,7 +151,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
-// Обработка видео и видеосообщений
+// Video va video-note bo'yicha qidiruv
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -206,19 +206,19 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Текстовый поиск
+// Matnli qidiruv
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// Обработка кнопки "Video"
+// Video tugmasi
 bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Обработка нажатий на кнопки 1-10 и отправка полного трека
+// Raqam bosilganda qo'shiqni yuborish
 bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
   const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
@@ -234,7 +234,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
 
   if (!selectedTrack.audioUrl) {
     return ctx.answerCallbackQuery({ 
-      text: "❌ Kechirasiz, bu qo'shiq uchun yuklab olish havolasi mavjud emas.", 
+      text: "❌ Kechirasiz, bu qo'shiq uchun manba topilmadi.", 
       show_alert: true 
     });
   }
@@ -245,7 +245,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
     await ctx.replyWithAudio(selectedTrack.audioUrl, {
       title: selectedTrack.title,
       performer: selectedTrack.artist,
-      caption: `🎵 **${selectedTrack.title}** — ${selectedTrack.artist}\n🤖 @${ctx.me.username}`,
+      caption: `🎵 **${selectedTrack.artist} — ${selectedTrack.title}**\n⏱ Davomiyligi: ${selectedTrack.duration}\n🤖 @${ctx.me.username}`,
       parse_mode: 'Markdown'
     });
   } catch (err) {
@@ -254,7 +254,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   }
 });
 
-// Запуск бота с автоматической очисткой зависших обновлений
+// Botni ishga tushirish
 bot.start({
   dropPendingUpdates: true,
   onStart: (botInfo) => {
@@ -262,7 +262,7 @@ bot.start({
   }
 });
 
-// Запуск HTTP-сервера для предотвращения остановки на Render
+// Web server (Render uchun)
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
