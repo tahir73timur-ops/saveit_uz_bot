@@ -5,18 +5,20 @@ const fs = require('fs');
 const path = require('path');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
+const instagramGetUrl = require('@social-sister/instagram-url-direct');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
+// BOT TOKENINGIZNI @BotFather ORQALI YANGILAB SHU YERGA YOZING
 const BOT_TOKEN = "8761282938:AAFrUbWZaCArkKjxhzNHXpDHK0zGYeIWhqk";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
 
 bot.command('start', (ctx) => {
-  ctx.reply(
+  return ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yoki video yuboring, original va haqiqiy ijrochining to'liq qo'shig'ini topib beraman! 🎧`
+    `Menga qo'shiq nomini, video yoki Instagram Reels havolasini (link) yuboring, original va haqiqiy qo'shiqni topib beraman! 🎧`
   );
 });
 
@@ -24,17 +26,16 @@ bot.command('start', (ctx) => {
 function formatDuration(seconds) {
   if (!seconds) return '03:00';
   const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+  const secs = Math.floor(seconds % 60);
   return `${minutes < 10 ? '0' : ''}${minutes}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
-// Videoni AudD API orqali tanib olish
+// AudD API orqali audioni tanib olish
 async function recognizeAudio(filePath) {
   try {
     const form = new FormData();
     form.append('file', fs.createReadStream(filePath));
     form.append('api_token', AUDD_API_KEY);
-    form.append('return', 'apple_music,spotify');
 
     const response = await axios.post('https://api.audd.io/', form, {
       headers: form.getHeaders(),
@@ -47,11 +48,11 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// Deezer API orqali qo'shiq qidirish
-async function searchMusicFromDeezer(query) {
+// Deezer API orqali eng yaxshi 1 TA ORIGINAL qo'shiqni topish
+async function searchSingleBestTrack(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    const url = `https://api.deezer.com/search?q=${formattedQuery}&limit=25`;
+    const url = `https://api.deezer.com/search?q=${formattedQuery}&limit=10`;
     
     const response = await axios.get(url);
 
@@ -61,69 +62,48 @@ async function searchMusicFromDeezer(query) {
         artist: track.artist ? track.artist.name : 'Nomaʼlum artist',
         audioUrl: track.preview,
         duration: formatDuration(track.duration),
-        album: track.album ? track.album.title : 'Single',
         isCoverOrRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke|instrumental/i.test(track.title)
       }));
 
-      // Original qo'shiqlarni tepaga chiqaramiz
+      // Asl original qo'shiqni 1-o'ringa suramiz
       tracks.sort((a, b) => a.isCoverOrRemix - b.isCoverOrRemix);
 
-      // 10 ta eng yaxshi natijani qaytaramiz
-      return tracks.slice(0, 10).map((track, index) => ({
-        id: index + 1,
-        title: track.title,
-        artist: track.artist,
-        audioUrl: track.audioUrl,
-        duration: track.duration,
-        album: track.album
-      }));
+      // Faqat eng yaxshi 1 ta natijani qaytaramiz
+      return tracks[0];
     } else {
-      return [];
+      return null;
     }
   } catch (error) {
     console.error("Deezer API xatolik:", error.message);
-    return [];
+    return null;
   }
 }
 
-// Natijalarni formatlab yuborish
-async function handleSearchAndReply(ctx, query, waitingMsgId) {
-  const tracks = await searchMusicFromDeezer(query);
+// Bitta eng aniq natijani yuborish
+async function handleSingleSearchAndReply(ctx, query, waitingMsgId) {
+  const track = await searchSingleBestTrack(query);
 
-  if (!tracks || tracks.length === 0) {
+  if (!track) {
     await ctx.api.editMessageText(
       ctx.chat.id, 
       waitingMsgId, 
-      '❌ Kechirasiz, bu qo\'shiq topilmadi. Boshqacharoq yozib ko\'ring.'
+      '❌ Kechirasiz, bu qo\'shiq topilmadi. Qaytadan urinib ko\'ring.'
     );
     return;
   }
 
-  const mainTrack = tracks[0];
-  let messageText = `🎵 **${mainTrack.artist} — ${mainTrack.title}**\n\n`;
-
-  tracks.forEach((track) => {
-    messageText += `${track.id}. ${track.artist} — *${track.title}*  \`[\${track.duration}]\`\n`;
-  });
-
-  messageText += `\n#MusicLovers`;
+  const messageText = `🎵 **Topilgan original qo'shiq:**\n\n` +
+                      `👤 **Ijrochi:** ${track.artist}\n` +
+                      `🎧 **Nomi:** ${track.title}\n` +
+                      `⏱ **Davomiyligi:** ${track.duration}\n\n` +
+                      `#MusicLovers`;
 
   const keyboard = new InlineKeyboard();
+  keyboard.text("⬇️ Qo'shiqni yuklab olish", "dl_single");
 
-  // Video tugmasi
-  keyboard.text("🎬 Video", "dummy_video").row();
-
-  // 1 dan 10 gacha tugmalar (har qatorda 5 tadan)
-  tracks.forEach((track, idx) => {
-    keyboard.text(`${track.id}`, `dl_${idx}`);
-    if ((idx + 1) % 5 === 0) {
-      keyboard.row();
-    }
-  });
-
-  // Xotirada saqlash
-  global.lastSearchResults = global.lastSearchResults || {};
-  global.lastSearchResults[ctx.chat.id] = tracks;
+  // Xotirada bitta qo'shiqni saqlaymiz
+  global.lastSingleTrack = global.lastSingleTrack || {};
+  global.lastSingleTrack[ctx.chat.id] = track;
 
   await ctx.api.editMessageText(
     ctx.chat.id,
@@ -136,7 +116,71 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
-// Video va video-note yuborilganda
+// Instagram havolasidan videoni yuklab olish va tanib olish
+async function handleInstagramLink(ctx, link) {
+  const waitingMsg = await ctx.reply('📥 Instagram videosi yuklanmoqda va musiqa tanib olinmoqda...');
+
+  const tempVideo = path.join(__dirname, `insta_${Date.now()}.mp4`);
+  const tempAudio = path.join(__dirname, `insta_${Date.now()}.mp3`);
+
+  try {
+    const instaData = await instagramGetUrl(link);
+    const mediaUrl = instaData?.url_list?.[0];
+
+    if (!mediaUrl) {
+      await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '❌ Instagram videoga kirish imkoni bo\'lmadi.');
+      return;
+    }
+
+    const response = await axios({ url: mediaUrl, responseType: 'stream' });
+    const writer = fs.createWriteStream(tempVideo);
+    response.data.pipe(writer);
+
+    writer.on('finish', () => {
+      ffmpeg(tempVideo)
+        .toFormat('mp3')
+        .on('end', async () => {
+          const result = await recognizeAudio(tempAudio);
+
+          if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo);
+          if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
+
+          if (result && result.status === 'success' && result.result) {
+            const songName = `${result.result.artist} ${result.result.title}`;
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              waitingMsg.message_id,
+              `✨ Videodagi musiqa: **${songName}**\n⏳ Qo'shiq tayyorlanmoqda...`,
+              { parse_mode: 'Markdown' }
+            );
+
+            await handleSingleSearchAndReply(ctx, songName, waitingMsg.message_id);
+          } else {
+            await ctx.api.editMessageText(
+              ctx.chat.id,
+              waitingMsg.message_id,
+              '❌ Videodagi musiqa tanib olinmadi.'
+            );
+          }
+        })
+        .on('error', async (err) => {
+          console.error(err);
+          if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo);
+          if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
+          await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Video audio shakliga o\'tkazilmadi.');
+        })
+        .save(tempAudio);
+    });
+
+  } catch (error) {
+    console.error("Insta error:", error.message);
+    if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo);
+    if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
+    await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Instagram havolasini qayta ishlashda xatolik yuz berdi.');
+  }
+}
+
+// Telegram ichida yuborilgan video va video_note
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -165,12 +209,11 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
             await ctx.api.editMessageText(
               ctx.chat.id,
               waitingMsg.message_id,
-              `✨ Topilgan musiqa: **${songName}**\n⏳ Ro'yxat tuzilmoqda...`,
+              `✨ Topilgan musiqa: **${songName}**\n⏳ Qo'shiq qidirilmoqda...`,
               { parse_mode: 'Markdown' }
             );
 
-            await handleSearchAndReply(ctx, songName, waitingMsg.message_id);
-
+            await handleSingleSearchAndReply(ctx, songName, waitingMsg.message_id);
           } else {
             await ctx.api.editMessageText(
               ctx.chat.id,
@@ -178,10 +221,6 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
               '❌ Videodagi musiqa aniqlanmadi.'
             );
           }
-        })
-        .on('error', async (err) => {
-          console.error(err);
-          await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, '⚠️ Videoni qayta ishlashda xatolik.');
         })
         .save(tempAudio);
     });
@@ -191,46 +230,35 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Matnli xabar va havolalarni tekshirish
+// Matnli xabarlar va linklar
 bot.on('message:text', async (ctx) => {
-  const query = ctx.message.text.trim();
+  const text = ctx.message.text.trim();
 
-  // Instagram yoki boshqa havolalar yuborilsa xatolik bermasligi uchun tekshiruv
-  if (query.startsWith('http://') || query.startsWith('https://')) {
-    await ctx.reply(
-      `⚠️ Kechirasiz, hozircha havolalarni to'g'ridan-to'g'ri o'qiy olmayman.\n\n` +
-      `Iltimos, videoni o'zini yuboring yoki qo'shiq nomini yozib yuboring! 🎧`
-    );
+  // Instagram havolasi bo'lsa
+  if (text.includes('instagram.com/')) {
+    await handleInstagramLink(ctx, text);
     return;
   }
 
-  const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
-  await handleSearchAndReply(ctx, query, waitingMsg.message_id);
-});
-
-// Video tugmasi bosilganda
-bot.callbackQuery("dummy_video", async (ctx) => {
-  await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
-});
-
-// Raqamli tugmalar bosilganda audioni yuborish
-bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
-  const trackIndex = parseInt(ctx.match[1]);
-  const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
-
-  if (!userTracks || !userTracks[trackIndex]) {
-    return ctx.answerCallbackQuery({
-      text: "⚠️ Natijalar eskirgan yoki topilmadi. Qaytadan qo'shiq qidiring.",
-      show_alert: true
-    });
+  // Boshqa turdagi havola bo'lsa
+  if (text.startsWith('http://') || text.startsWith('https://')) {
+    await ctx.reply('⚠️ Hozircha faqat Instagram Reels havolalarini tahlil qila olaman.');
+    return;
   }
 
-  const selectedTrack = userTracks[trackIndex];
+  // Odatdiy matnli qidiruv
+  const waitingMsg = await ctx.reply('🔎 Qo\'shiq qidirilmoqda...');
+  await handleSingleSearchAndReply(ctx, text, waitingMsg.message_id);
+});
 
-  if (!selectedTrack.audioUrl) {
-    return ctx.answerCallbackQuery({ 
-      text: "❌ Kechirasiz, bu qo'shiq uchun yuklab olish havolasi mavjud emas.", 
-      show_alert: true 
+// Yuklab olish tugmasi
+bot.callbackQuery("dl_single", async (ctx) => {
+  const selectedTrack = global.lastSingleTrack && global.lastSingleTrack[ctx.chat.id];
+
+  if (!selectedTrack || !selectedTrack.audioUrl) {
+    return ctx.answerCallbackQuery({
+      text: "⚠️ Qo'shiq ma'lumotlari eskirgan. Qaytadan qidiring.",
+      show_alert: true
     });
   }
 
@@ -257,7 +285,7 @@ bot.start({
   }
 });
 
-// Serverni ishga tushirish
+// HTTP Server
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
