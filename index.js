@@ -148,6 +148,7 @@ async function getTrackById(id) {
       title: data.title,
       artist: data.artist ? data.artist.name : 'Nomaʼlum',
       audioUrl: data.preview,
+      link: data.link,
       duration: formatDuration(data.duration),
     };
   } catch (err) {
@@ -344,6 +345,13 @@ bot.callbackQuery(/^dl:(\d+)$/, async (ctx) => {
       performer: track.artist,
       caption: `🎵 <b>${escapeHtml(track.artist)} — ${escapeHtml(track.title)}</b>\n🤖 @${ctx.me.username}`,
       parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard()
+        .url("🎧 To'liq qo'shiq (Deezer)", track.link || 'https://www.deezer.com')
+        .row()
+        .url(
+          '▶️ YouTube\'da tinglash',
+          `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.artist} ${track.title}`)}`
+        ),
     });
   } catch (err) {
     console.error('Audio yuborishda xatolik:', err.message);
