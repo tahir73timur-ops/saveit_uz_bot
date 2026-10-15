@@ -1,19 +1,21 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const axios = require('axios');
-const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const { pipeline } = require('stream/promises');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const AUDD_API_KEY = process.env.AUDD_API_KEY;
+// Kalitlar faqat Render -> Environment bo'limidan olinadi
+const BOT_TOKEN = process.env.BOT_TOKEN || process.env.BOT;
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+const SHAZAM_HOST = 'shazam.p.rapidapi.com';
 
 if (!BOT_TOKEN) {
-  console.error('BOT_TOKEN topilmadi! Environment variable sifatida kiriting.');
+  console.error('BOT_TOKEN topilmadi! Render -> Environment bo\'limiga kiriting.');
   process.exit(1);
 }
 
@@ -37,7 +39,7 @@ const normalize = (s = '') =>
 const VARIANT_WORDS = ['remix', 'slowed', 'reverb', 'sped up', 'speed up', 'bass boosted',
   'cover', 'tribute', 'live', 'karaoke', 'instrumental', 'acoustic'];
 
-// Video sarlavhasini tozalash: "(Official Video)", "[Lyrics]" va h.k. ni olib tashlaydi
+// Video sarlavhasini tozalash: "(Official Video)", "[Lyrics]" va h.k.
 function cleanTitle(title = '') {
   return title
     .replace(/[\(\[][^\)\]]*(official|video|lyrics?|audio|clip|klip|mv|hd|4k|visualizer)[^\)\]]*[\)\]]/gi, ' ')
@@ -56,7 +58,6 @@ function scoreTrack(track, query, index) {
   for (const w of qWords) if (haystack.includes(w)) matched++;
   let score = qWords.length ? matched / qWords.length : 0;
 
-  // Foydalanuvchi so'ramagan bo'lsa remix/cover/live'ni jarimaga tortamiz
   const titleNorm = normalize(track.title);
   for (const v of VARIANT_WORDS) {
     if (titleNorm.includes(v) && !q.includes(v)) {
@@ -65,53 +66,76 @@ function scoreTrack(track, query, index) {
     }
   }
 
-  // Deezer o'zi bergan tartibga ozgina ustunlik
   score += (10 - index) * 0.01;
   return score;
 }
 
 // ---------- API'lar ----------
 
+// Shazam (RapidAPI): xom audio (s16le, 44100 Hz, mono) base64 ko'rinishida
 async function recognizeAudio(filePath) {
+  if (!RAPIDAPI_KEY) {
+    console.error('RAPIDAPI_KEY topilmadi!');
+    return null;
+  }
   try {
-    const form = new FormData();
-    form.append('file', fs.createReadStream(filePath));
-    form.append('api_token', AUDD_API_KEY);
-    const { data } = await axios.post('https://api.audd.io/', form, {
-      headers: form.getHeaders(),
-      timeout: 30000,
-    });
-    return data;
+    const base64 = fs.readFileSync(filePath).toString('base64');
+    const { data } = await axios.post(
+      `https://${SHAZAM_HOST}/songs/v2/detect`,
+      base64,
+      {
+        params: { timezone: 'Asia/Tashkent', locale: 'en-US' },
+        headers: {
+          'content-type': 'text/plain',
+          'x-rapidapi-key': RAPIDAPI_KEY,
+          'x-rapidapi-host': SHAZAM_HOST,
+        },
+        timeout: 30000,
+        maxBodyLength: Infinity,
+      }
+    );
+    if (data && data.track) {
+      return { artist: data.track.subtitle, title: data.track.title };
+    }
+    console.log('Shazam: trek topilmadi');
+    return null;
   } catch (err) {
-    console.error('AudD error:', err.message);
+    console.error('Shazam error:', err.response?.status, err.message);
     return null;
   }
 }
 
-async function searchBestTrack(query) {
+async function searchTracks(query) {
   try {
     const { data } = await axios.get('https://api.deezer.com/search', {
-      params: { q: query, limit: 15 },
+      params: { q: query, limit: 30 },
       timeout: 15000,
     });
     const list = data && data.data;
-    if (!list || !list.length) return null;
+    if (!list || !list.length) return [];
 
     const ranked = list
-      .map((t, i) => ({ t, score: scoreTrack(t, query, i) }))
+      .map((t, i) => ({ t, score: scoreTrack(t, query, Math.min(i, 10)) }))
       .sort((a, b) => b.score - a.score);
 
-    const best = ranked[0].t;
-    return {
-      id: best.id,
-      title: best.title,
-      artist: best.artist ? best.artist.name : 'Nomaʼlum',
-      audioUrl: best.preview,
-      duration: formatDuration(best.duration),
-    };
+    // Bir xil qo'shiqlarni (takrorlarni) olib tashlash
+    const seen = new Set();
+    const result = [];
+    for (const { t } of ranked) {
+      const key = normalize(`${t.artist ? t.artist.name : ''} ${t.title}`);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({
+        id: t.id,
+        title: t.title,
+        artist: t.artist ? t.artist.name : 'Nomaʼlum',
+        duration: formatDuration(t.duration),
+      });
+    }
+    return result;
   } catch (err) {
     console.error('Deezer API error:', err.message);
-    return null;
+    return [];
   }
 }
 
@@ -148,28 +172,71 @@ async function getTitleFromLink(url) {
   }
 }
 
+// ---------- Audio ajratish ----------
+
+function extractAudio(videoPath, outPath, startSec) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(videoPath)
+      .seekInput(startSec)
+      .noVideo()
+      .audioCodec('pcm_s16le')
+      .audioChannels(1)
+      .audioFrequency(44100)
+      .duration(5)
+      .format('s16le')
+      .on('error', reject)
+      .on('end', resolve)
+      .save(outPath);
+  });
+}
+
 // ---------- Javob yuborish ----------
 
-async function replyWithTrack(ctx, query, waitingMsgId) {
-  const track = await searchBestTrack(query);
+const PER_PAGE = 10;
+const searchCache = new Map();
 
-  if (!track) {
+function cacheSet(key, tracks) {
+  searchCache.set(key, tracks);
+  if (searchCache.size > 300) searchCache.delete(searchCache.keys().next().value);
+}
+
+function renderPage(tracks, page, key) {
+  const start = page * PER_PAGE;
+  const slice = tracks.slice(start, start + PER_PAGE);
+
+  let text = `🎵 <b>Topilgan qo'shiqlar</b> (${start + 1}-${start + slice.length} / ${tracks.length})\n\n`;
+  slice.forEach((t, i) => {
+    text += `${start + i + 1}. <b>${escapeHtml(t.artist)}</b> — ${escapeHtml(t.title)} (${t.duration})\n`;
+  });
+  text += `\nYuklab olish uchun raqamni bosing 👇`;
+
+  const kb = new InlineKeyboard();
+  slice.forEach((t, i) => {
+    kb.text(String(start + i + 1), `dl:${t.id}`);
+    if ((i + 1) % 5 === 0) kb.row();
+  });
+  kb.row();
+  if (page > 0) kb.text('⬅️ Oldingi', `pg:${key}:${page - 1}`);
+  if (start + PER_PAGE < tracks.length) kb.text('Keyingi ➡️', `pg:${key}:${page + 1}`);
+
+  return { text, kb };
+}
+
+async function replyWithTrack(ctx, query, waitingMsgId) {
+  const tracks = await searchTracks(query);
+
+  if (!tracks.length) {
     await ctx.api.editMessageText(ctx.chat.id, waitingMsgId, "❌ Kechirasiz, bu qo'shiq topilmadi.");
     return;
   }
 
-  const text =
-    `🎵 <b>Topilgan qo'shiq:</b>\n\n` +
-    `👤 <b>Ijrochi:</b> ${escapeHtml(track.artist)}\n` +
-    `🎧 <b>Nomi:</b> ${escapeHtml(track.title)}\n` +
-    `⏱ <b>Davomiyligi:</b> ${track.duration}\n\n` +
-    `#MusicLovers`;
-
-  const keyboard = new InlineKeyboard().text("⬇️ Qo'shiqni yuklab olish", `dl:${track.id}`);
+  const key = `${ctx.chat.id}_${waitingMsgId}`;
+  cacheSet(key, tracks);
+  const { text, kb } = renderPage(tracks, 0, key);
 
   await ctx.api.editMessageText(ctx.chat.id, waitingMsgId, text, {
     parse_mode: 'HTML',
-    reply_markup: keyboard,
+    reply_markup: kb,
   });
 }
 
@@ -186,15 +253,14 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
   const stamp = Date.now();
   const tempVideo = path.join(__dirname, `temp_${stamp}.mp4`);
-  const tempAudio = path.join(__dirname, `temp_${stamp}.mp3`);
+  const tempAudio = path.join(__dirname, `temp_${stamp}.raw`);
 
   const cleanup = () => {
     for (const f of [tempVideo, tempAudio]) {
       try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_) {}
     }
   };
-  const fail = async (msg) => {
-    cleanup();
+  const edit = async (msg) => {
     try { await ctx.api.editMessageText(ctx.chat.id, waitingMsg.message_id, msg); } catch (_) {}
   };
 
@@ -202,46 +268,35 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
     const file = await ctx.getFile(); // Telegram: 20 MB gacha
     const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
 
-    const response = await axios({ url: fileUrl, responseType: 'stream' });
-    const writer = fs.createWriteStream(tempVideo);
-    response.data.pipe(writer);
+    const response = await axios({ url: fileUrl, responseType: 'stream', timeout: 60000 });
+    await pipeline(response.data, fs.createWriteStream(tempVideo));
 
-    writer.on('error', () => fail('⚠️ Faylni yuklashda xatolik.'));
-    writer.on('finish', () => {
-      ffmpeg(tempVideo)
-        .noVideo()
-        .audioCodec('libmp3lame')
-        .audioChannels(1)
-        .audioFrequency(44100)
-        .duration(25) // faqat 25 soniya yetarli
-        .format('mp3')
-        .on('error', (e) => {
-          console.error('ffmpeg error:', e.message);
-          fail('⚠️ Videodan audio ajratib bo\'lmadi.');
-        })
-        .on('end', async () => {
-          try {
-            const result = await recognizeAudio(tempAudio);
-            cleanup();
+    // Avval boshidan, topilmasa 10-soniyadan boshlab tekshiramiz
+    let result = null;
+    for (const start of [0, 10]) {
+      try {
+        await extractAudio(tempVideo, tempAudio, start);
+      } catch (e) {
+        console.error('ffmpeg error:', e.message);
+        continue;
+      }
+      if (!fs.existsSync(tempAudio) || fs.statSync(tempAudio).size < 20000) continue;
 
-            if (result && result.status === 'success' && result.result) {
-              const songName = `${result.result.artist} ${result.result.title}`;
-              await replyWithTrack(ctx, songName, waitingMsg.message_id);
-            } else {
-              await ctx.api.editMessageText(
-                ctx.chat.id, waitingMsg.message_id, '❌ Videodagi musiqa aniqlanmadi.'
-              );
-            }
-          } catch (e) {
-            console.error(e);
-            fail('⚠️ Xatolik yuz berdi.');
-          }
-        })
-        .save(tempAudio);
-    });
+      result = await recognizeAudio(tempAudio);
+      if (result) break;
+    }
+
+    cleanup();
+
+    if (result) {
+      await replyWithTrack(ctx, `${result.artist} ${result.title}`, waitingMsg.message_id);
+    } else {
+      await edit('❌ Videodagi musiqa aniqlanmadi.');
+    }
   } catch (error) {
     console.error(error);
-    fail('⚠️ Xatolik yuz berdi.');
+    cleanup();
+    await edit('⚠️ Xatolik yuz berdi.');
   }
 });
 
@@ -249,7 +304,6 @@ bot.on('message:text', async (ctx) => {
   const text = ctx.message.text.trim();
   if (text.startsWith('/')) return;
 
-  // Havola bo'lsa
   if (/^https?:\/\//i.test(text)) {
     const waitingMsg = await ctx.reply('🔗 Havola tekshirilmoqda...');
     const title = await getTitleFromLink(text);
@@ -294,6 +348,23 @@ bot.callbackQuery(/^dl:(\d+)$/, async (ctx) => {
   } catch (err) {
     console.error('Audio yuborishda xatolik:', err.message);
     await ctx.reply('⚠️ Audioni yuborishda xatolik yuz berdi.');
+  }
+});
+
+bot.callbackQuery(/^pg:(.+):(\d+)$/, async (ctx) => {
+  const tracks = searchCache.get(ctx.match[1]);
+  if (!tracks) {
+    return ctx.answerCallbackQuery({
+      text: "⚠️ Natijalar eskirgan. Qaytadan qidiring.",
+      show_alert: true,
+    });
+  }
+  const { text, kb } = renderPage(tracks, Number(ctx.match[2]), ctx.match[1]);
+  await ctx.answerCallbackQuery();
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (err) {
+    console.error('Sahifalash xatosi:', err.message);
   }
 });
 
