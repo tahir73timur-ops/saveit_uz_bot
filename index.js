@@ -10,7 +10,7 @@ const instagramGetUrl = require('@social-sister/instagram-url-direct');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 // BOT TOKENINGIZNI @BotFather ORQALI YANGILAB SHU YERGA YOZING
-const BOT_TOKEN = "8761282938:AAFrUbWZaCArkKjxhzNHXpDHK0zGYeIWhqk";
+const BOT_TOKEN = "8761282938:AAEB0sE8a-P1n9YTPNfzKNFU1WktLavrPr8";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
