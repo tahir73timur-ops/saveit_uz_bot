@@ -8,8 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// BOT TOKENINGIZNI SHU YERGA YOZING
-const BOT_TOKEN = "8761282938:AAElL-TlzFgMKedUUD_6MtWvpW0HwvKOr7E";
+const BOT_TOKEN = "8761282938:AAHrS877l-bY4wBnOx7sQFGMUqfClgevCak";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
@@ -17,11 +16,11 @@ const bot = new Bot(BOT_TOKEN);
 bot.command('start', (ctx) => {
   ctx.reply(
     `Salom, ${ctx.from.first_name}! 👋\n\n` +
-    `Menga qo'shiq nomini yoki video yuboring, original va haqiqiy ijrochining qo'shig'ini topib beraman! 🎧`
+    `Menga qo'shiq nomini yoki video yuboring, original va haqiqiy ijrochining to'liq qo'shig'ini topib beraman! 🎧`
   );
 });
 
-// Millisekundlarni MM:SS formatiga o'tkazish
+// Форматирование времени из миллисекунд в MM:SS
 function formatDurationFromMs(ms) {
   if (!ms) return '3:00';
   const totalSeconds = Math.floor(ms / 1000);
@@ -30,7 +29,7 @@ function formatDurationFromMs(ms) {
   return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 }
 
-// Videoni AudD API orqali tanib olish
+// Распознавание аудио через AudD API
 async function recognizeAudio(filePath) {
   try {
     const form = new FormData();
@@ -49,12 +48,12 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// Haqiqiy va original qo'shiqlarni aniq topish uchun funksiya
+// Поиск оригинальных треков через iTunes API (до 10 результатов)
 async function searchMusicFromiTunes(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
-    // Ko'proq natija olib, ularning ichidan asl ijrochini saralab olamiz
-    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=25`;
+    // Запрашиваем 40 результатов для качественной фильтрации оригинала
+    const url = `https://itunes.apple.com/search?term=${formattedQuery}&entity=song&limit=40`;
     
     const response = await axios.get(url, {
       headers: {
@@ -69,14 +68,14 @@ async function searchMusicFromiTunes(query) {
         audioUrl: track.previewUrl,
         duration: formatDurationFromMs(track.trackTimeMillis),
         album: track.collectionName || 'Single',
-        // Kaver, remiks, slowed yoki jonli ijrolarni aniqlaymiz
+        // Проверка на каверы, ремиксы и замедленные версии
         isCoverOrRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke|instrumental/i.test(track.trackName)
       }));
 
-      // Asl (original) versiyalarni va remiks bo'lmaganlarni birinchi o'ringa chiqazamiz
+      // Сортировка: оригинальные версии помещаются выше ремиксов
       tracks.sort((a, b) => a.isCoverOrRemix - b.isCoverOrRemix);
 
-      // Agar qidiruv so'zida artist ismi aniq qatnashgan bo'lsa, o'sha artistga ustunlik beramiz
+      // Приоритет по совпадению поискового запроса с исполнителем
       const lowerQuery = query.toLowerCase();
       tracks.sort((a, b) => {
         const aMatch = (a.artist.toLowerCase().includes(lowerQuery) || a.title.toLowerCase().includes(lowerQuery)) ? 0 : 1;
@@ -84,8 +83,8 @@ async function searchMusicFromiTunes(query) {
         return aMatch - bMatch;
       });
 
-      // Faqat eng aniq va original 5 ta qo'shiqni qaytaramiz
-      return tracks.slice(0, 5).map((track, index) => ({
+      // Возвращаем до 10 точных результатов
+      return tracks.slice(0, 10).map((track, index) => ({
         id: index + 1,
         title: track.title,
         artist: track.artist,
@@ -102,7 +101,7 @@ async function searchMusicFromiTunes(query) {
   }
 }
 
-// Qidiruv natijalarini formatlab yuborish
+// Обработка запроса и формирование меню
 async function handleSearchAndReply(ctx, query, waitingMsgId) {
   const tracks = await searchMusicFromiTunes(query);
 
@@ -126,15 +125,18 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
 
   const keyboard = new InlineKeyboard();
 
-  // Video tugmasi
+  // Кнопка Видео
   keyboard.text("🎬 Video", "dummy_video").row();
 
-  // 1 dan 5 gacha raqamli tugmalar
+  // Кнопки от 1 до 10 (по 5 кнопок в ряд)
   tracks.forEach((track, idx) => {
     keyboard.text(`${track.id}`, `dl_${idx}`);
+    if ((idx + 1) % 5 === 0) {
+      keyboard.row();
+    }
   });
 
-  // Natijalarni xotirada saqlaymiz
+  // Сохранение результатов в глобальной памяти
   global.lastSearchResults = global.lastSearchResults || {};
   global.lastSearchResults[ctx.chat.id] = tracks;
 
@@ -149,7 +151,7 @@ async function handleSearchAndReply(ctx, query, waitingMsgId) {
   );
 }
 
-// Video va video-note yuborilganda
+// Обработка видео и видеосообщений
 bot.on(['message:video', 'message:video_note'], async (ctx) => {
   const waitingMsg = await ctx.reply('🔍 Videodagi musiqa tahlil qilinmoqda...');
 
@@ -204,19 +206,19 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Matnli xabar orqali qidirish
+// Текстовый поиск
 bot.on('message:text', async (ctx) => {
   const query = ctx.message.text;
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
 
-// Video tugmasi bosilganda
+// Обработка кнопки "Video"
 bot.callbackQuery("dummy_video", async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Bu tugma video ko'rsatish uchun mo'ljallangan.", show_alert: false });
 });
 
-// Raqamli tugmalar bosilganda to'g'ridan-to'g'ri audioni yuborish
+// Обработка нажатий на кнопки 1-10 и отправка полного трека
 bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   const trackIndex = parseInt(ctx.match[1]);
   const userTracks = global.lastSearchResults && global.lastSearchResults[ctx.chat.id];
@@ -252,7 +254,7 @@ bot.callbackQuery(/^dl_(\d+)\$/, async (ctx) => {
   }
 });
 
-// Botni ishga tushirish (dropPendingUpdates ziddiyatlarni oldini oladi)
+// Запуск бота с автоматической очисткой зависших обновлений
 bot.start({
   dropPendingUpdates: true,
   onStart: (botInfo) => {
@@ -260,7 +262,7 @@ bot.start({
   }
 });
 
-// Serverni ishga tushirish
+// Запуск HTTP-сервера для предотвращения остановки на Render
 const http = require('http');
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
