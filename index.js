@@ -8,7 +8,7 @@ const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const BOT_TOKEN = "8761282938:AAEWjd-seLxU033SHLxm8HjyfO0CHcy74vo";
+const BOT_TOKEN = "8761282938:AAFrUbWZaCArkKjxhzNHXpDHK0zGYeIWhqk";
 const AUDD_API_KEY = "your_audd_api_key_here";
 
 const bot = new Bot(BOT_TOKEN);
@@ -47,7 +47,7 @@ async function recognizeAudio(filePath) {
   }
 }
 
-// Deezer API orqali qo'shiq qidirish (O'zbekcha, ruscha va xorijiy qo'shiqlarni mukammal topadi)
+// Deezer API orqali qo'shiq qidirish
 async function searchMusicFromDeezer(query) {
   try {
     const formattedQuery = encodeURIComponent(query);
@@ -59,7 +59,7 @@ async function searchMusicFromDeezer(query) {
       let tracks = response.data.data.map((track) => ({
         title: track.title || 'Nomaʼlum',
         artist: track.artist ? track.artist.name : 'Nomaʼlum artist',
-        audioUrl: track.preview, // 30 soniyalik preview yoki to'liq qism
+        audioUrl: track.preview,
         duration: formatDuration(track.duration),
         album: track.album ? track.album.title : 'Single',
         isCoverOrRemix: /remix|slowed|reverb|sped up|bass boosted|cover|tribute|live|karaoke|instrumental/i.test(track.title)
@@ -191,9 +191,19 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
   }
 });
 
-// Matnli xabar orqali qidirish
+// Matnli xabar va havolalarni tekshirish
 bot.on('message:text', async (ctx) => {
-  const query = ctx.message.text;
+  const query = ctx.message.text.trim();
+
+  // Instagram yoki boshqa havolalar yuborilsa xatolik bermasligi uchun tekshiruv
+  if (query.startsWith('http://') || query.startsWith('https://')) {
+    await ctx.reply(
+      `⚠️ Kechirasiz, hozircha havolalarni to'g'ridan-to'g'ri o'qiy olmayman.\n\n` +
+      `Iltimos, videoni o'zini yuboring yoki qo'shiq nomini yozib yuboring! 🎧`
+    );
+    return;
+  }
+
   const waitingMsg = await ctx.reply('🔎 Qidirilmoqda...');
   await handleSearchAndReply(ctx, query, waitingMsg.message_id);
 });
