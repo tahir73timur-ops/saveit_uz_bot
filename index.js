@@ -19,6 +19,25 @@ const AUDIUS_ENABLED = Boolean(AUDIUS_BEARER);
 const AUDIUS_APP = 'saveit_uz_bot';
 const audiusHeaders = { Authorization: `Bearer ${AUDIUS_BEARER}` };
 
+// ---------- O'z kutubxonam (faqat huquqi bor audiolar) ----------
+const ADMIN_ID = process.env.ADMIN_ID ? Number(process.env.ADMIN_ID) : null;
+const LIBRARY_PATH = process.env.LIBRARY_PATH || path.join(__dirname, 'library.json');
+let library = [];
+try {
+  library = JSON.parse(fs.readFileSync(LIBRARY_PATH, 'utf8'));
+} catch (_) {
+  library = [];
+}
+function saveLibrary() {
+  try {
+    fs.writeFileSync(LIBRARY_PATH, JSON.stringify(library));
+  } catch (e) {
+    console.error('Kutubxonani saqlashda xato:', e.message);
+  }
+}
+const isAdmin = (ctx) => Boolean(ADMIN_ID && ctx.from && ctx.from.id === ADMIN_ID);
+
+
 if (!BOT_TOKEN) {
   console.error('BOT_TOKEN topilmadi! Render -> Environment bo\'limiga kiriting.');
   process.exit(1);
@@ -43,6 +62,17 @@ const normalize = (s = '') =>
 
 const VARIANT_WORDS = ['remix', 'slowed', 'reverb', 'sped up', 'speed up', 'bass boosted',
   'cover', 'tribute', 'live', 'karaoke', 'instrumental', 'acoustic'];
+
+
+function searchLibrary(query) {
+  const words = normalize(query).split(' ').filter(Boolean);
+  if (!words.length) return [];
+  return library.filter((t) => {
+    const hay = normalize(`${t.artist} ${t.title}`);
+    const matched = words.filter((w) => hay.includes(w)).length;
+    return matched / words.length >= 0.6;
+  });
+}
 
 // Video sarlavhasini tozalash: "(Official Video)", "[Lyrics]" va h.k.
 function cleanTitle(title = '') {
@@ -326,6 +356,8 @@ function renderPage(tracks, page, key) {
   kb.row();
   if (page > 0) kb.text('⬅️ Oldingi', `pg:${key}:${page - 1}`);
   if (start + PER_PAGE < tracks.length) kb.text('Keyingi ➡️', `pg:${key}:${page + 1}`);
+  const libCount = searchLibrary(queryCache.get(key) || '').length;
+  if (libCount) kb.row().text(`📚 Kutubxona (${libCount} ta, to'liq)`, `lb:${key}`);
   if (AUDIUS_ENABLED) kb.row().text("🎵 Audius (to'liq trek, bot ichida)", `au:${key}`);
   if (JAMENDO_ID) kb.row().text("🎼 Erkin musiqa (Jamendo)", `jm:${key}`);
 
@@ -409,6 +441,141 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
     console.error(error);
     cleanup();
     await edit('⚠️ Xatolik yuz berdi.');
+  }
+});
+
+// ---------- Kutubxona handlerlari ----------
+
+bot.command('myid', (ctx) => ctx.reply(`Sizning Telegram ID: ${ctx.from.id}`));
+
+bot.on('message:audio', async (ctx) => {
+  if (!isAdmin(ctx)) {
+    return ctx.reply("📚 Kutubxonaga faqat admin audio qo'sha oladi.");
+  }
+  const a = ctx.message.audio;
+  let artist = a.performer || '';
+  let title = a.title || '';
+  const cap = (ctx.message.caption || '').trim();
+  if (cap.includes(' - ')) {
+    const [x, ...rest] = cap.split(' - ');
+    artist = x.trim();
+    title = rest.join(' - ').trim();
+  }
+  if (!title) title = (a.file_name || 'Nomsiz').replace(/\.[^.]+$/, '');
+  if (!artist) artist = 'Nomaʼlum';
+
+  library.push({
+    id: Date.now().toString(36),
+    fileId: a.file_id,
+    title,
+    artist,
+    duration: formatDuration(a.duration),
+  });
+  saveLibrary();
+
+  await ctx.reply(
+    `✅ Kutubxonaga qo'shildi (jami ${library.length} ta):\n${artist} — ${title}\n\n` +
+      `⚠️ Faqat huquqingiz bor audiolarni qo'shing.\n` +
+      `Render qayta ishga tushsa ro'yxat o'chib ketishi mumkin, shuning uchun /backup bilan zaxira oling.`
+  );
+});
+
+bot.command('kutubxona', async (ctx) => {
+  if (!library.length) return ctx.reply("📚 Kutubxona hozircha bo'sh.");
+  const items = library.slice(-30).reverse();
+  const kb = new InlineKeyboard();
+  let text = `📚 <b>Kutubxona</b> (jami ${library.length} ta, oxirgi ${items.length} tasi):\n\n`;
+  items.forEach((t, i) => {
+    text += `${i + 1}. <b>${escapeHtml(t.artist)}</b> — ${escapeHtml(t.title)} (${t.duration})\n`;
+    kb.text(String(i + 1), `lg:${t.id}`);
+    if ((i + 1) % 5 === 0) kb.row();
+  });
+  await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb });
+});
+
+bot.command('del', async (ctx) => {
+  if (!isAdmin(ctx)) return;
+  const n = Number(ctx.match);
+  const items = library.slice(-30).reverse();
+  const item = items[n - 1];
+  if (!item) return ctx.reply("Foydalanish: /kutubxona ro'yxatidagi raqam bilan, masalan: /del 2");
+  library = library.filter((t) => t.id !== item.id);
+  saveLibrary();
+  await ctx.reply(`🗑 O'chirildi: ${item.artist} — ${item.title}`);
+});
+
+bot.command('backup', async (ctx) => {
+  if (!isAdmin(ctx)) return;
+  await ctx.replyWithDocument(
+    new InputFile(Buffer.from(JSON.stringify(library, null, 1)), 'library.json'),
+    { caption: "Zaxira. Qayta tiklash uchun shu faylni botga yuboring." }
+  );
+});
+
+bot.on('message:document', async (ctx) => {
+  if (!isAdmin(ctx)) return;
+  const doc = ctx.message.document;
+  if (!doc.file_name || doc.file_name !== 'library.json') return;
+  try {
+    const file = await ctx.getFile();
+    const { data } = await axios.get(`https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`, {
+      responseType: 'json',
+      timeout: 30000,
+    });
+    if (!Array.isArray(data)) throw new Error('Format noto\'g\'ri');
+    const ids = new Set(library.map((t) => t.id));
+    let added = 0;
+    for (const t of data) {
+      if (t && t.id && t.fileId && !ids.has(t.id)) {
+        library.push(t);
+        added++;
+      }
+    }
+    saveLibrary();
+    await ctx.reply(`✅ Tiklandi: ${added} ta yangi qo'shiq qo'shildi (jami ${library.length} ta).`);
+  } catch (e) {
+    console.error('Restore xatosi:', e.message);
+    await ctx.reply('⚠️ Zaxira faylni o\'qib bo\'lmadi.');
+  }
+});
+
+bot.callbackQuery(/^lb:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  const query = queryCache.get(key);
+  if (!query) {
+    return ctx.answerCallbackQuery({ text: '⚠️ Natijalar eskirgan. Qaytadan qidiring.', show_alert: true });
+  }
+  await ctx.answerCallbackQuery();
+  const items = searchLibrary(query).slice(0, 10);
+  const kb = new InlineKeyboard();
+  let text = `📚 <b>Kutubxona</b>, to'liq treklar:\n\n`;
+  items.forEach((t, i) => {
+    text += `${i + 1}. <b>${escapeHtml(t.artist)}</b> — ${escapeHtml(t.title)} (${t.duration})\n`;
+    kb.text(String(i + 1), `lg:${t.id}`);
+    if ((i + 1) % 5 === 0) kb.row();
+  });
+  kb.row().text('⬅️ Orqaga', `pg:${key}:0`);
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (_) {}
+});
+
+bot.callbackQuery(/^lg:([a-z0-9]+)$/, async (ctx) => {
+  const item = library.find((t) => t.id === ctx.match[1]);
+  if (!item) {
+    return ctx.answerCallbackQuery({ text: '⚠️ Trek topilmadi.', show_alert: true });
+  }
+  await ctx.answerCallbackQuery({ text: `⏳ ${item.title} yuborilmoqda...` });
+  try {
+    await ctx.replyWithAudio(item.fileId, {
+      title: item.title,
+      performer: item.artist,
+      caption: `📚 <b>${escapeHtml(item.artist)} — ${escapeHtml(item.title)}</b>\n🤖 @${ctx.me.username}`,
+      parse_mode: 'HTML',
+    });
+  } catch (err) {
+    console.error('Kutubxona audio xatosi:', err.message);
+    await ctx.reply('⚠️ Audioni yuborishda xatolik yuz berdi.');
   }
 });
 
