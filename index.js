@@ -1,4 +1,4 @@
-const { Bot, InlineKeyboard } = require('grammy');
+const { Bot, InlineKeyboard, InputFile } = require('grammy');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +13,11 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.BOT;
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const SHAZAM_HOST = 'shazam.p.rapidapi.com';
+const JAMENDO_ID = process.env.JAMENDO_CLIENT_ID;
+const AUDIUS_BEARER = process.env.AUDIUS_BEARER_TOKEN;
+const AUDIUS_ENABLED = Boolean(AUDIUS_BEARER);
+const AUDIUS_APP = 'saveit_uz_bot';
+const audiusHeaders = { Authorization: `Bearer ${AUDIUS_BEARER}` };
 
 if (!BOT_TOKEN) {
   console.error('BOT_TOKEN topilmadi! Render -> Environment bo\'limiga kiriting.');
@@ -139,6 +144,107 @@ async function searchTracks(query) {
   }
 }
 
+// Jamendo: erkin litsenziyali musiqa (to'liq trek)
+async function searchJamendo(query) {
+  if (!JAMENDO_ID) return [];
+  try {
+    const { data } = await axios.get('https://api.jamendo.com/v3.0/tracks/', {
+      params: {
+        client_id: JAMENDO_ID,
+        format: 'json',
+        limit: 10,
+        search: query,
+        audioformat: 'mp32',
+      },
+      timeout: 15000,
+    });
+    return ((data && data.results) || []).map((t) => ({
+      id: t.id,
+      title: t.name,
+      artist: t.artist_name,
+      duration: formatDuration(t.duration),
+    }));
+  } catch (err) {
+    console.error('Jamendo search error:', err.message);
+    return [];
+  }
+}
+
+async function getJamendoTrack(id) {
+  if (!JAMENDO_ID) return null;
+  try {
+    const { data } = await axios.get('https://api.jamendo.com/v3.0/tracks/', {
+      params: { client_id: JAMENDO_ID, format: 'json', id, audioformat: 'mp32' },
+      timeout: 15000,
+    });
+    const t = data && data.results && data.results[0];
+    if (!t) return null;
+    return {
+      id: t.id,
+      title: t.name,
+      artist: t.artist_name,
+      audioUrl: t.audio,
+      shareUrl: t.shareurl,
+    };
+  } catch (err) {
+    console.error('Jamendo track error:', err.message);
+    return null;
+  }
+}
+
+// Audius: to'liq treklar (mustaqil musiqachilar)
+async function searchAudius(query) {
+  if (!AUDIUS_ENABLED) return [];
+  try {
+    const { data } = await axios.get('https://api.audius.co/v1/tracks/search', {
+      params: { query, limit: 10, app_name: AUDIUS_APP },
+      headers: audiusHeaders,
+      timeout: 15000,
+    });
+    return ((data && data.data) || [])
+      .filter((t) => t.is_streamable !== false)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        artist: (t.user && t.user.name) || 'Nomaʼlum',
+        duration: formatDuration(t.duration),
+      }));
+  } catch (err) {
+    console.error('Audius search error:', err.response?.status, err.message);
+    return [];
+  }
+}
+
+async function downloadAudius(id) {
+  try {
+    const info = await axios.get(`https://api.audius.co/v1/tracks/${id}`, {
+      params: { app_name: AUDIUS_APP },
+      headers: audiusHeaders,
+      timeout: 15000,
+    });
+    const t = info.data && info.data.data;
+    if (!t) return null;
+
+    const stream = await axios.get(`https://api.audius.co/v1/tracks/${id}/stream`, {
+      params: { app_name: AUDIUS_APP },
+      headers: audiusHeaders,
+      responseType: 'arraybuffer',
+      timeout: 90000,
+      maxContentLength: 50 * 1024 * 1024,
+    });
+
+    return {
+      title: t.title,
+      artist: (t.user && t.user.name) || 'Nomaʼlum',
+      permalink: t.permalink,
+      buffer: Buffer.from(stream.data),
+    };
+  } catch (err) {
+    console.error('Audius stream error:', err.response?.status, err.message);
+    return null;
+  }
+}
+
 async function getTrackById(id) {
   try {
     const { data } = await axios.get(`https://api.deezer.com/track/${id}`, { timeout: 15000 });
@@ -195,6 +301,7 @@ function extractAudio(videoPath, outPath, startSec) {
 
 const PER_PAGE = 10;
 const searchCache = new Map();
+const queryCache = new Map();
 
 function cacheSet(key, tracks) {
   searchCache.set(key, tracks);
@@ -219,6 +326,8 @@ function renderPage(tracks, page, key) {
   kb.row();
   if (page > 0) kb.text('⬅️ Oldingi', `pg:${key}:${page - 1}`);
   if (start + PER_PAGE < tracks.length) kb.text('Keyingi ➡️', `pg:${key}:${page + 1}`);
+  if (AUDIUS_ENABLED) kb.row().text("🎵 Audius (to'liq trek, bot ichida)", `au:${key}`);
+  if (JAMENDO_ID) kb.row().text("🎼 Erkin musiqa (Jamendo)", `jm:${key}`);
 
   return { text, kb };
 }
@@ -233,6 +342,8 @@ async function replyWithTrack(ctx, query, waitingMsgId) {
 
   const key = `${ctx.chat.id}_${waitingMsgId}`;
   cacheSet(key, tracks);
+  queryCache.set(key, query);
+  if (queryCache.size > 300) queryCache.delete(queryCache.keys().next().value);
   const { text, kb } = renderPage(tracks, 0, key);
 
   await ctx.api.editMessageText(ctx.chat.id, waitingMsgId, text, {
@@ -373,6 +484,129 @@ bot.callbackQuery(/^pg:(.+):(\d+)$/, async (ctx) => {
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
   } catch (err) {
     console.error('Sahifalash xatosi:', err.message);
+  }
+});
+
+bot.callbackQuery(/^jm:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  const query = queryCache.get(key);
+  if (!query) {
+    return ctx.answerCallbackQuery({ text: '⚠️ Natijalar eskirgan. Qaytadan qidiring.', show_alert: true });
+  }
+  await ctx.answerCallbackQuery({ text: '🔎 Erkin musiqa qidirilmoqda...' });
+
+  const tracks = await searchJamendo(query);
+  const kb = new InlineKeyboard();
+
+  if (!tracks.length) {
+    kb.text('⬅️ Orqaga', `pg:${key}:0`);
+    try {
+      await ctx.editMessageText(
+        "🎼 Jamendo'da (erkin musiqa) bu qo'shiq topilmadi.\n\nMashhur artistlarning qo'shiqlari u yerda bo'lmaydi.",
+        { reply_markup: kb }
+      );
+    } catch (_) {}
+    return;
+  }
+
+  let text = `🎼 <b>Erkin musiqa (Jamendo)</b>, to'liq treklar:\n\n`;
+  tracks.forEach((t, i) => {
+    text += `${i + 1}. <b>${escapeHtml(t.artist)}</b> — ${escapeHtml(t.title)} (${t.duration})\n`;
+    kb.text(String(i + 1), `jd:${t.id}`);
+    if ((i + 1) % 5 === 0) kb.row();
+  });
+  kb.row().text('⬅️ Orqaga', `pg:${key}:0`);
+
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (err) {
+    console.error('Jamendo ro\'yxat xatosi:', err.message);
+  }
+});
+
+bot.callbackQuery(/^jd:(\d+)$/, async (ctx) => {
+  const track = await getJamendoTrack(ctx.match[1]);
+  if (!track || !track.audioUrl) {
+    return ctx.answerCallbackQuery({ text: '⚠️ Trek topilmadi.', show_alert: true });
+  }
+  await ctx.answerCallbackQuery({ text: `⏳ ${track.title} yuborilmoqda...` });
+
+  try {
+    await ctx.replyWithAudio(track.audioUrl, {
+      title: track.title,
+      performer: track.artist,
+      caption:
+        `🎼 <b>${escapeHtml(track.artist)} — ${escapeHtml(track.title)}</b>\n` +
+        `Manba: Jamendo (Creative Commons)\n🤖 @${ctx.me.username}`,
+      parse_mode: 'HTML',
+      reply_markup: track.shareUrl
+        ? new InlineKeyboard().url('ℹ️ Litsenziya / trek sahifasi', track.shareUrl)
+        : undefined,
+    });
+  } catch (err) {
+    console.error('Jamendo audio xatosi:', err.message);
+    await ctx.reply('⚠️ Audioni yuborishda xatolik yuz berdi.');
+  }
+});
+
+bot.callbackQuery(/^au:(.+)$/, async (ctx) => {
+  const key = ctx.match[1];
+  const query = queryCache.get(key);
+  if (!query) {
+    return ctx.answerCallbackQuery({ text: '⚠️ Natijalar eskirgan. Qaytadan qidiring.', show_alert: true });
+  }
+  await ctx.answerCallbackQuery({ text: '🔎 Audius qidirilmoqda...' });
+
+  const tracks = await searchAudius(query);
+  const kb = new InlineKeyboard();
+
+  if (!tracks.length) {
+    kb.text('⬅️ Orqaga', `pg:${key}:0`);
+    try {
+      await ctx.editMessageText(
+        "🎵 Audius'da bu qo'shiq topilmadi.\n\nMashhur artistlarning qo'shiqlari u yerda ko'pincha bo'lmaydi. Boshqa so'z yoki artist nomi bilan sinab ko'ring.",
+        { reply_markup: kb }
+      );
+    } catch (_) {}
+    return;
+  }
+
+  let text = `🎵 <b>Audius</b>, to'liq treklar:\n\n`;
+  tracks.forEach((t, i) => {
+    text += `${i + 1}. <b>${escapeHtml(t.artist)}</b> — ${escapeHtml(t.title)} (${t.duration})\n`;
+    kb.text(String(i + 1), `ad:${t.id}`);
+    if ((i + 1) % 5 === 0) kb.row();
+  });
+  kb.row().text('⬅️ Orqaga', `pg:${key}:0`);
+
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (err) {
+    console.error('Audius ro\'yxat xatosi:', err.message);
+  }
+});
+
+bot.callbackQuery(/^ad:([A-Za-z0-9_-]+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery({ text: '⏳ To\'liq trek yuklanmoqda, biroz kuting...' });
+
+  const track = await downloadAudius(ctx.match[1]);
+  if (!track) {
+    return ctx.reply('⚠️ Treksni yuklab bo\'lmadi. Keyinroq qayta urinib ko\'ring.');
+  }
+
+  try {
+    await ctx.replyWithAudio(new InputFile(track.buffer, `${track.artist} - ${track.title}.mp3`), {
+      title: track.title,
+      performer: track.artist,
+      caption: `🎵 <b>${escapeHtml(track.artist)} — ${escapeHtml(track.title)}</b>\nManba: Audius\n🤖 @${ctx.me.username}`,
+      parse_mode: 'HTML',
+      reply_markup: track.permalink
+        ? new InlineKeyboard().url('ℹ️ Audius sahifasi', `https://audius.co${track.permalink}`)
+        : undefined,
+    });
+  } catch (err) {
+    console.error('Audius yuborish xatosi:', err.message);
+    await ctx.reply('⚠️ Audioni yuborishda xatolik yuz berdi.');
   }
 });
 
