@@ -211,7 +211,7 @@ async function searchAudius(query) {
       }));
   } catch (err) {
     console.error('Audius search error:', err.response?.status, err.message);
-    return [];
+    return null;
   }
 }
 
@@ -559,6 +559,17 @@ bot.callbackQuery(/^au:(.+)$/, async (ctx) => {
 
   const tracks = await searchAudius(query);
   const kb = new InlineKeyboard();
+
+  if (tracks === null) {
+    kb.text('⬅️ Orqaga', `pg:${key}:0`);
+    try {
+      await ctx.editMessageText(
+        "⚠️ Audius bilan bog'lanib bo'lmadi. Kalit (AUDIUS_BEARER_TOKEN) noto'g'ri bo'lishi mumkin. Render Logs'dagi 'Audius search error' qatoriga qarang.",
+        { reply_markup: kb }
+      );
+    } catch (_) {}
+    return;
+  }
 
   if (!tracks.length) {
     kb.text('⬅️ Orqaga', `pg:${key}:0`);
