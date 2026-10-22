@@ -112,7 +112,7 @@ function scoreTrack(track, query, index) {
 async function recognizeAudio(filePath) {
   if (!RAPIDAPI_KEY) {
     console.error('RAPIDAPI_KEY topilmadi!');
-    return null;
+    return { error: 'kalit-yoq' };
   }
   try {
     const base64 = fs.readFileSync(filePath).toString('base64');
@@ -136,8 +136,9 @@ async function recognizeAudio(filePath) {
     console.log('Shazam: trek topilmadi');
     return null;
   } catch (err) {
-    console.error('Shazam error:', err.response?.status, err.message);
-    return null;
+    const code = err.response?.status || 'tarmoq';
+    console.error('Shazam error:', code, err.message);
+    return { error: code };
   }
 }
 
@@ -541,6 +542,7 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
 
     // Avval boshidan, topilmasa 10-soniyadan boshlab tekshiramiz
     let result = null;
+    let apiError = null;
     for (const start of [0, 8, 16, 25]) {
       try {
         await extractAudio(tempVideo, tempAudio, start);
@@ -550,14 +552,29 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
       }
       if (!fs.existsSync(tempAudio) || fs.statSync(tempAudio).size < 20000) continue;
 
-      result = await recognizeAudio(tempAudio);
-      if (result) break;
+      const r = await recognizeAudio(tempAudio);
+      if (r && r.error) {
+        apiError = r.error;
+        if ([401, 403, 429, 'kalit-yoq'].includes(r.error)) break; // davom ettirishdan foyda yo'q
+        continue;
+      }
+      if (r) {
+        result = r;
+        break;
+      }
     }
 
     cleanup();
 
     if (result) {
       await replyWithTrack(ctx, `${result.artist} ${result.title}`, waitingMsg.message_id);
+    } else if (apiError) {
+      const hint =
+        apiError === 'kalit-yoq' ? "RAPIDAPI_KEY Render'da qo'yilmagan."
+        : apiError === 403 || apiError === 401 ? "Shazam kaliti noto'g'ri yoki API'ga obuna (Subscribe) qilinmagan."
+        : apiError === 429 ? "Shazam bepul limiti tugagan."
+        : 'Shazam xizmati vaqtincha ishlamayapti.';
+      await edit(`⚠️ Musiqani aniqlash xizmatida xato (${apiError}).\n${hint}`);
     } else {
       await edit('❌ Videodagi musiqa aniqlanmadi.');
     }
