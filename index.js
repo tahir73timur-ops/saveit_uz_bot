@@ -17,6 +17,7 @@ const JAMENDO_ID = process.env.JAMENDO_CLIENT_ID;
 const AUDIUS_BEARER = process.env.AUDIUS_BEARER_TOKEN;
 const AUDIUS_ENABLED = Boolean(AUDIUS_BEARER);
 const AUDIUS_APP = 'saveit_uz_bot';
+const YOUTUBE_KEY = process.env.YOUTUBE_API_KEY;
 const audiusHeaders = { Authorization: `Bearer ${AUDIUS_BEARER}` };
 
 // ---------- O'z kutubxonam (faqat huquqi bor audiolar) ----------
@@ -275,6 +276,120 @@ async function downloadAudius(id) {
   }
 }
 
+// YouTube rasmiy API: qo'shiq uchun aniq video havolasi
+async function getYoutubeUrl(artist, title) {
+  const query = `${artist} ${title}`;
+  const fallback = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+  if (!YOUTUBE_KEY) return fallback;
+  try {
+    const { data } = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+      params: {
+        part: 'snippet',
+        type: 'video',
+        videoCategoryId: '10',
+        maxResults: 1,
+        q: query,
+        key: YOUTUBE_KEY,
+      },
+      timeout: 15000,
+    });
+    const id = data && data.items && data.items[0] && data.items[0].id && data.items[0].id.videoId;
+    return id ? `https://www.youtube.com/watch?v=${id}` : fallback;
+  } catch (err) {
+    console.error('YouTube API error:', err.response?.status, err.message);
+    return fallback;
+  }
+}
+
+async function getTrackById(id) {
+  try {
+    const { data } = await axios.get(`https://api.deezer.com/track/${id}`, { timeout: 15000 });
+    if (!data || data.error) return null;
+    return {
+      id: data.id,
+      title: data.title,
+      artist: data.artist ? data.artist.name : 'Nomaʼlum',
+      audioUrl: data.preview,
+      link: data.link,
+      duration: formatDuration(data.duration),
+    };
+  } catch (err) {
+    console.error('Deezer track error:', err.message);
+    return null;
+  }
+}
+
+// Sarlavhadan bir nechta qidiruv variantlarini yasash
+function buildQueries(rawTitle, author = '') {
+  let t = String(rawTitle).split('|')[0];
+  t = t.replace(/[\(\[\{][^\)\]\}]*[\)\]\}]/g, ' ');
+  t = t.replace(/\b(official|video|lyrics?|audio|klip|clip|rasmiy|hd|4k|mv|visualizer)\b/gi, ' ');
+  t = t.replace(/["'“”«»]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const noFeat = t.replace(/\b(ft|feat|featuring|prod)\b.*$/i, '').trim();
+  const channel = String(author)
+    .replace(/\s*[-–]\s*topic$/i, '')
+    .replace(/\b(vevo|official|records?|tv)\b/gi, '')
+    .trim();
+
+  const list = [];
+  const add = (q) => {
+    q = q.replace(/\s+/g, ' ').trim();
+    if (q && !list.includes(q)) list.push(q);
+  };
+
+  const dash = /\s[-–—]\s/;
+  add(t.replace(new RegExp(dash.source, 'g'), ' '));
+  add(noFeat.replace(new RegExp(dash.source, 'g'), ' '));
+
+  const parts = t.split(dash);
+  if (parts.length >= 2) add(parts.slice(1).join(' ')); // faqat qo'shiq nomi
+  if (parts.length === 1 && channel) add(`${channel} ${noFeat || t}`);
+  return list;
+}
+
+// YouTube havolasidan sarlavha olib, qidiruv variantlarini qaytaradi (oEmbed)
+async function getTitleFromLink(url) {
+  const isYoutube = /(youtube\.com|youtu\.be)/i.test(url);
+  if (!isYoutube) return null;
+  try {
+    const { data } = await axios.get('https://www.youtube.com/oembed', {
+      params: { url, format: 'json' },
+      timeout: 15000,
+    });
+    const queries = buildQueries(data.title || '', data.author_name || '');
+    return queries.length ? queries : null;
+  } catch (err) {
+    console.error('oEmbed error:', err.message);
+    return null;
+  }
+}
+
+// YouTube rasmiy API: qo'shiq uchun aniq video havolasi
+async function getYoutubeUrl(artist, title) {
+  const query = `${artist} ${title}`;
+  const fallback = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+  if (!YOUTUBE_KEY) return fallback;
+  try {
+    const { data } = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+      params: {
+        part: 'snippet',
+        type: 'video',
+        videoCategoryId: '10',
+        maxResults: 1,
+        q: query,
+        key: YOUTUBE_KEY,
+      },
+      timeout: 15000,
+    });
+    const id = data && data.items && data.items[0] && data.items[0].id && data.items[0].id.videoId;
+    return id ? `https://www.youtube.com/watch?v=${id}` : fallback;
+  } catch (err) {
+    console.error('YouTube API error:', err.response?.status, err.message);
+    return fallback;
+  }
+}
+
 async function getTrackById(id) {
   try {
     const { data } = await axios.get(`https://api.deezer.com/track/${id}`, { timeout: 15000 });
@@ -365,7 +480,16 @@ function renderPage(tracks, page, key) {
 }
 
 async function replyWithTrack(ctx, query, waitingMsgId) {
-  const tracks = await searchTracks(query);
+  const variants = Array.isArray(query) ? query : [query];
+  let tracks = [];
+  let usedQuery = variants[0];
+  for (const q of variants) {
+    tracks = await searchTracks(q);
+    if (tracks.length) {
+      usedQuery = q;
+      break;
+    }
+  }
 
   if (!tracks.length) {
     await ctx.api.editMessageText(ctx.chat.id, waitingMsgId, "❌ Kechirasiz, bu qo'shiq topilmadi.");
@@ -374,7 +498,7 @@ async function replyWithTrack(ctx, query, waitingMsgId) {
 
   const key = `${ctx.chat.id}_${waitingMsgId}`;
   cacheSet(key, tracks);
-  queryCache.set(key, query);
+  queryCache.set(key, usedQuery);
   if (queryCache.size > 300) queryCache.delete(queryCache.keys().next().value);
   const { text, kb } = renderPage(tracks, 0, key);
 
@@ -417,7 +541,7 @@ bot.on(['message:video', 'message:video_note'], async (ctx) => {
 
     // Avval boshidan, topilmasa 10-soniyadan boshlab tekshiramiz
     let result = null;
-    for (const start of [0, 10]) {
+    for (const start of [0, 8, 16, 25]) {
       try {
         await extractAudio(tempVideo, tempAudio, start);
       } catch (e) {
@@ -628,7 +752,7 @@ bot.callbackQuery(/^dl:(\d+)$/, async (ctx) => {
         .row()
         .url(
           '▶️ YouTube\'da tinglash',
-          `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.artist} ${track.title}`)}`
+          (await getYoutubeUrl(track.artist, track.title))
         ),
     });
   } catch (err) {
